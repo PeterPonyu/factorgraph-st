@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use FactorGraph-ST, please cite this repository."
+title: "FactorGraph-ST"
+abstract: "Graph-factor learning of spatial domains and gene programs in spatial transcriptomics."
+authors:
+  - family-names: Fu
+    given-names: Zeyu
+    alias: PeterPonyu
+repository-code: "https://github.com/PeterPonyu/factorgraph-st"
+license: MIT
+version: 0.0.0.dev0
+date-released: 2026-05-27
