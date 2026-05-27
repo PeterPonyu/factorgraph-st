@@ -26,10 +26,14 @@ def validate_inputs(
     """
     if X.ndim != 2:
         raise SchemaError(f"X must be 2D; got ndim={X.ndim}")
+    if X.dtype != np.float32:
+        raise SchemaError(f"X must be float32; got {X.dtype}")
     n_spots = X.shape[0]
 
     if coords.ndim != 2 or coords.shape[1] != 2:
         raise SchemaError(f"coords must be (n_spots, 2); got shape={coords.shape}")
+    if coords.dtype != np.float32:
+        raise SchemaError(f"coords must be float32; got {coords.dtype}")
     if coords.shape[0] != n_spots:
         raise SchemaError(f"coords n_spots={coords.shape[0]} != X n_spots={n_spots}")
 
@@ -40,8 +44,8 @@ def validate_inputs(
 
     if edges.ndim != 2 or edges.shape[0] != 2:
         raise SchemaError(f"edges must be (2, n_edges); got shape={edges.shape}")
-    if edges.dtype.kind not in ("i", "u"):
-        raise SchemaError(f"edges must be integer dtype; got {edges.dtype}")
+    if edges.dtype != np.int64:
+        raise SchemaError(f"edges must be int64; got {edges.dtype}")
     if edges.size and (edges.min() < 0 or edges.max() >= n_spots):
         raise SchemaError("edges contain indices outside [0, n_spots)")
 
@@ -58,19 +62,27 @@ def validate_outputs(
     """Validate MVP outputs, including nonnegativity of factor matrices."""
     if H.ndim != 2 or H.shape[0] != n_spots:
         raise SchemaError(f"H must be (n_spots, d); got shape={H.shape}")
+    if H.dtype != np.float32:
+        raise SchemaError(f"H must be float32; got {H.dtype}")
 
     if W.ndim != 2 or W.shape[0] != n_genes:
         raise SchemaError(f"W must be (n_genes, K); got shape={W.shape}")
+    if W.dtype != np.float32:
+        raise SchemaError(f"W must be float32; got {W.dtype}")
     if (W < 0).any():
         raise SchemaError("W must be nonnegative")
 
     if Z_shared.ndim != 2 or Z_shared.shape[0] != n_spots:
         raise SchemaError(f"Z_shared must be (n_spots, K_shared); got shape={Z_shared.shape}")
+    if Z_shared.dtype != np.float32:
+        raise SchemaError(f"Z_shared must be float32; got {Z_shared.dtype}")
     if (Z_shared < 0).any():
         raise SchemaError("Z_shared must be nonnegative")
 
     if Z_private.ndim != 2 or Z_private.shape[0] != n_spots:
         raise SchemaError(f"Z_private must be (n_spots, K_private); got shape={Z_private.shape}")
+    if Z_private.dtype != np.float32:
+        raise SchemaError(f"Z_private must be float32; got {Z_private.dtype}")
     if (Z_private < 0).any():
         raise SchemaError("Z_private must be nonnegative")
 
@@ -82,7 +94,7 @@ def validate_outputs(
 
     if domain_id.ndim != 1 or domain_id.shape[0] != n_spots:
         raise SchemaError(f"domain_id must be (n_spots,); got shape={domain_id.shape}")
-    if domain_id.dtype.kind not in ("i", "u"):
-        raise SchemaError(f"domain_id must be integer dtype; got {domain_id.dtype}")
+    if domain_id.dtype != np.int64:
+        raise SchemaError(f"domain_id must be int64; got {domain_id.dtype}")
     if domain_id.size and domain_id.min() < 0:
         raise SchemaError("domain_id must be non-negative")

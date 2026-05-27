@@ -21,6 +21,26 @@ def test_valid_outputs_pass():
     validate_outputs(**_ok())
 
 
+def test_H_wrong_dtype():
+    n_spots = 6
+    H = np.zeros((n_spots, 4), dtype=np.float64)
+    W = np.zeros((5, 3), dtype=np.float32)
+    Z_shared = np.zeros((n_spots, 2), dtype=np.float32)
+    Z_private = np.zeros((n_spots, 1), dtype=np.float32)
+    domain = np.zeros(n_spots, dtype=np.int64)
+    with pytest.raises(SchemaError, match="H must be float32"):
+        validate_outputs(H, W, Z_shared, Z_private, domain, n_spots, 5)
+
+def test_W_wrong_dtype():
+    n_spots = 6
+    H = np.zeros((n_spots, 4), dtype=np.float32)
+    W = np.zeros((5, 3), dtype=np.float64)
+    Z_shared = np.zeros((n_spots, 2), dtype=np.float32)
+    Z_private = np.zeros((n_spots, 1), dtype=np.float32)
+    domain = np.zeros(n_spots, dtype=np.int64)
+    with pytest.raises(SchemaError, match="W must be float32"):
+        validate_outputs(H, W, Z_shared, Z_private, domain, n_spots, 5)
+
 def test_W_negative_fails():
     kw = _ok()
     kw["W"] = kw["W"].copy()
@@ -62,7 +82,7 @@ def test_H_wrong_n_spots():
 def test_domain_id_wrong_dtype():
     kw = _ok()
     kw["domain_id"] = np.zeros(kw["n_spots"], dtype=np.float32)
-    with pytest.raises(SchemaError, match="domain_id must be integer"):
+    with pytest.raises(SchemaError, match="domain_id must be int64"):
         validate_outputs(**kw)
 
 
