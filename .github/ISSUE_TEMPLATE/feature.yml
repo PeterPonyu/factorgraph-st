@@ -23,7 +23,7 @@ body:
       options:
         - label: Will not vendor or copy baseline source.
           required: true
-        - label: Will not reference sibling brands (lumina-st, aether-3d, niche-lens-st).
+        - label: Will not reference unrelated sibling-project brands.
           required: true
         - label: Will not reuse INSPIRE source until its repository license is explicitly resolved (see `docs/PROVENANCE_CHECKLIST.md`).
           required: true
