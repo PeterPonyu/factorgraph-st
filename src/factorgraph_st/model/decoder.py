@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import nnls
 
 from factorgraph_st.model.encoder import encode_graph
 from factorgraph_st.schemas import validate_outputs
@@ -93,13 +94,27 @@ def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
 
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    """Solve column-wise nonnegative least-squares for ``W`` given ``Z`` and ``X``.
+
+    For each gene column ``j``, returns the ``W[j, :]`` that minimizes
+    ``||X[:, j] - Z @ W[j, :].T||_2`` subject to ``W[j, :] >= 0`` via
+    :func:`scipy.optimize.nnls`. This replaces the prior ``clip(lstsq, 0)``
+    estimator, which is *not* NNLS — clipping an unconstrained solution
+    yields a biased, non-optimal ``W`` whenever the true optimum has active
+    nonneg constraints. See #83.
+    """
     if Z.shape[0] == 0:
         # Empty input: return deterministic, finite, nonnegative zeros.
         # np.empty would leak uninitialized memory (often non-finite or
         # negative), violating the nonnegative-loadings contract.
         return np.zeros((X.shape[1], Z.shape[1]), dtype=np.float32)
-    coef, *_ = np.linalg.lstsq(Z.astype(np.float64), X.astype(np.float64), rcond=None)
-    return np.clip(coef.T, 0.0, None).astype(np.float32)
+    Z64 = Z.astype(np.float64, copy=False)
+    X64 = X.astype(np.float64, copy=False)
+    n_features = X64.shape[1]
+    W = np.empty((n_features, Z64.shape[1]), dtype=np.float64)
+    for j in range(n_features):
+        W[j], _ = nnls(Z64, X64[:, j])
+    return W.astype(np.float32)
 
 
 def _cluster_domains(
