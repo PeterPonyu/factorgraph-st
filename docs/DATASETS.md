@@ -2,9 +2,12 @@
 
 This guide maps the **audited, real-world** spatial-transcriptomics (ST) cohorts
 that FactorGraph-ST should ingest, and shows how each one supports the method's
-core goal. It complements [`DATA.md`](DATA.md) (which covers the small
-squidpy/figshare smoke-test stack: DLPFC, mouse-brain pair, MERFISH) — this file
-is the roadmap for the production cancer cohorts that justify the method.
+core goal. It covers two tiers: **Tier A** — the production cancer cohorts that
+justify the method (large, histology-paired raw-count collections) — and
+**Tier B** — a small Python-native squidpy/scanpy quick-load stack (DLPFC
+12-section, mouse-brain pair, MERFISH) for fast iteration and smoke tests before
+committing the Tier A network budget. Both tiers mirror the program registry
+(`ST_research/datasets/DATASET_REGISTRY.md`).
 
 Canonical figures and links below come from the program registry
 (`ST_research/datasets/DATASET_REGISTRY.md`, audited 2026-05-28). Where a hotlink
@@ -27,10 +30,12 @@ profiled on several platforms) and **multiple independent cancer Visium
 collections**. FactorGraph-ST is explicitly **not** histology-first and does not
 depend on paired protein/ATAC/histology modalities.
 
-## Recommended datasets
+## Tier A — production cancer cohorts (raw counts + spatial)
 
 Ordered by value to cross-section factor learning. "Fit" = why the dataset
-exercises shared/private factor separation across sections.
+exercises shared/private factor separation across sections. This is the
+factorgraph-st slice of **Tier A** in the program registry
+(`ST_research/datasets/DATASET_REGISTRY.md`).
 
 | # | Dataset | Accession / ID | Platform | Tissue / disease | Size (raw) | Link | Fit for cross-section factor learning |
 |---|---------|----------------|----------|------------------|-----------|------|----------------------------------------|
@@ -52,6 +57,131 @@ shared/private decomposition is designed for. Recommended first integration is t
 **matched samples** (the tumours that appear in more than one of the three records)
 so that shared factors can be validated for cross-platform invariance before the
 full collection is pulled.
+
+## Tier B — Python-native quick-load (squidpy/scanpy)
+
+A small, zero-glue stack of one-line loaders (plus the DLPFC figshare benchmark)
+for fast iteration, smoke tests, and structure checks before committing the
+Tier A network budget. All loaders were confirmed importable + loadable in the
+`dl` conda env (scanpy 1.10.4, squidpy 1.6.5, anndata 0.10.7, spatialdata 0.4.0)
+on 2026-05-28. These mirror **Tier B** of the program registry
+(`ST_research/datasets/DATASET_REGISTRY.md`); full network-verification evidence
+is in `ST_research/references/DATASET_CATALOG.md`.
+
+> Quick start
+> ```bash
+> conda run --no-capture-output -n dl python scripts/data/fetch_datasets.py --list
+> conda run --no-capture-output -n dl python scripts/data/fetch_datasets.py \
+>     --dataset visium_mouse_brain_pair --dry-run
+> ```
+
+### ★ Primary — DLPFC 12-section Visium (Maynard 2021)
+
+The canonical multi-section spatial-domain benchmark: **12 Visium sections, 3
+donors, manual cortical-layer labels** (Layer 1–6 + white matter) — the reference
+for measuring spatial-domain recovery across heterogeneous sections. Not a
+one-line loader, but the primary multi-section domain pick.
+
+- **Access:** figshare article `22004273` (*Visium DLPFC preprocessed .h5ad*,
+  DOI `10.6084/m9.figshare.22004273.v2`) → per-section files
+  `151507.h5ad … 151676.h5ad` via `https://ndownloader.figshare.com/files/<id>`.
+  Real per-section file IDs are recorded in
+  [`../data/cards/dlpfc_maynard_2021.yaml`](../data/cards/dlpfc_maynard_2021.yaml)
+  and in `scripts/data/fetch_datasets.py`. Alternative: Bioconductor `spatialLIBD`.
+- **Platform:** 10x Visium (spot) · **Size:** ~1.3 GB (12 × ~0.1 GB `.h5ad`) ·
+  **Sections:** 12 (`151507–151510`, `151669–151676`).
+- **Labels:** manual cortical-layer annotation in `obs`.
+- **Raw counts:** normalized matrix in `X`; raw UMI counts preserved in `.raw`.
+- **License:** CC BY 4.0.
+
+```bash
+conda run --no-capture-output -n dl python scripts/data/fetch_datasets.py \
+    --dataset dlpfc_maynard_2021 --download    # ~1.3 GB; omit --download to plan only
+```
+
+### B4 — Visium adult mouse brain coronal pair (raw in `.raw`)
+
+Two coronal sections of the same adult mouse brain — a fast, fully Python-native
+two-section stack for smoke tests and quick domain experiments.
+
+- **Access:** `squidpy.datasets.visium_hne_adata()` (H&E) + `visium_fluo_adata()`
+  (fluorescence).
+- **Platform:** 10x Visium · **Sections:** 2 (not z-registered) ·
+  ~2,688 / ~2,800 spots; ~18k / ~16k genes.
+- **Labels:** Leiden clusters in `obs` (clustering, not curated domains).
+- **Raw counts:** **yes — in `.raw`** of each section (safe for DL training).
+- **License:** 10x public / squidpy example data.
+- Card: [`../data/cards/visium_mouse_brain_pair.yaml`](../data/cards/visium_mouse_brain_pair.yaml).
+  Shared 2-section anchor across repos in this research program.
+
+### B1 — MERFISH mouse hypothalamus (Moffitt 2018; 8 AP sections)
+
+Single-cell-resolution imaging ST with **8 anterior–posterior levels**
+(`obs['Bregma']`) usable as multiple sections — a heterogeneous, non-Visium stress
+test for the section-aware encoder.
+
+- **Access:** `squidpy.datasets.merfish()` · **Platform:** MERFISH (imaging) ·
+  73,655 cells × 161 genes · 8 AP sections (`obs['Bregma']`; 3D coords in
+  `obsm['spatial3d']`) · **Labels:** `obs['Cell_class']`.
+- **Raw counts:** the squidpy copy is **normalized**; for DL training pull raw
+  counts from Dryad `doi:10.5061/dryad.8t8s248` (CC0, ~1.03 GB).
+- Card: [`../data/cards/merfish_hypothalamus_shared.yaml`](../data/cards/merfish_hypothalamus_shared.yaml).
+  Shared multi-section anchor across repos in this research program.
+
+### Assembling multi-section inputs + building the kNN graph
+
+`scripts/data/fetch_datasets.py` ships helpers that turn a list of per-section
+AnnData objects into the `X / coords / section_id / edges` contract (see
+[Method recap](#method-recap-why-these-datasets)), building the per-section graph
+with `squidpy.gr.spatial_neighbors`:
+
+```python
+import scanpy as sc
+import squidpy as sq
+from scripts.data.fetch_datasets import build_section_inputs, build_spatial_graph
+
+# 1) Load several sections (e.g. a few DLPFC samples after download)
+sections = [sc.read_h5ad(f"data/raw/dlpfc_maynard_2021/{s}.h5ad")
+            for s in ("151507", "151508", "151509")]
+
+# 2) Assemble multi-section inputs: X (stacked, raw via .raw), coords,
+#    integer section_id, global edges.
+inputs = build_section_inputs(sections, n_neighs=6, coord_type="grid", use_raw=True)
+X, coords, section_id, edges = (
+    inputs["X"], inputs["coords"], inputs["section_id"], inputs["edges"]
+)
+
+# Single-section graph build (Visium uses the hex grid; imaging platforms such
+# as MERFISH use coord_type="generic"):
+sq.gr.spatial_neighbors(sections[0], coord_type="grid", n_neighs=6)
+edges_0 = build_spatial_graph(sections[0], n_neighs=6, coord_type="grid")
+```
+
+`section_id` is a contiguous integer per section; `edges` are offset so node
+indices are global across the concatenated stack — exactly the COO format the
+model expects.
+
+### Tier B dataset cards
+
+| Card | Dataset | Registry Tier B |
+|---|---|---|
+| [`dlpfc_maynard_2021.yaml`](../data/cards/dlpfc_maynard_2021.yaml) | DLPFC 12-section Visium | primary multi-section |
+| [`visium_mouse_brain_pair.yaml`](../data/cards/visium_mouse_brain_pair.yaml) | Visium mouse brain coronal pair | B4 |
+| [`merfish_hypothalamus_shared.yaml`](../data/cards/merfish_hypothalamus_shared.yaml) | MERFISH hypothalamus (8 AP sections) | B1 |
+
+`data/raw/` and `data/processed/` are git-ignored; `data/cards/` is tracked.
+
+### Baseline data provenance (citation only)
+
+For reproducing prior-art comparison setups, the secondary baseline **HarveST**
+publishes a data bundle on Zenodo (`10.5281/zenodo.18532348`, `HarveST_Data.zip`)
+containing DLPFC / MOB / HBRC / PDAC sections. The **INSPIRE** (`zenodo 18330972`)
+and **HarveST** Zenodo records are otherwise **code-only** (GitHub release
+archives), not primary data hosts — FactorGraph-ST therefore pulls its benchmark
+data from the platform sources above (figshare / squidpy / Dryad), not baseline
+bundles. These names appear here purely as dataset provenance; baseline *method*
+details live in [`../BASELINE_REFERENCES.md`](../BASELINE_REFERENCES.md) (see
+[`ALLOWED_BASELINE_CONTEXTS.md`](ALLOWED_BASELINE_CONTEXTS.md)).
 
 ## Local resources & ingestion entry points
 
@@ -83,3 +213,49 @@ and dominates the FactorGraph-ST data budget. Use a selective-download strategy
 three records up front. `fetch_datasets.py` gates large payloads behind an
 explicit `--download` flag, and `--dry-run` plans byte counts without touching the
 network — use these before committing the footprint.
+
+## Extended validation datasets
+
+A raw-count verification pass (2026-05-28) confirmed that **all eight Tier A
+cohorts above distribute genuine raw integer count matrices** (not normalized-only
+objects), and added cohorts that close cross-study / cross-platform gaps.
+Verification methods: direct download + listing of the smallest Cervilla Visium
+archive; **remote ZIP central-directory inspection** (HTTP range requests, no full
+download) for the imaging arms and the Dawo bundle; and **streamed `tar` header
+parsing** for the GEO `*_RAW.tar` archives.
+
+### Raw-count verification — Tier A cohorts
+
+| # | Dataset | Issue | Raw-count artifact (verified) | Verdict |
+|---|---------|-------|-------------------------------|---------|
+| 1 | Cervilla — Visium/HD (Zenodo 17999961) | [#32](https://github.com/PeterPonyu/factorgraph-st/issues/32) | `visium_*/outs/filtered_feature_bc_matrix.h5` + `outs/spatial/` (Space Ranger); HD bins in `visiumhd_*` | ✅ |
+| 2 | Cervilla — Xenium & CosMx (17986017) | [#33](https://github.com/PeterPonyu/factorgraph-st/issues/33) | Xenium `cell_feature_matrix.h5`; CosMx `*_exprMat_file.csv.gz` (+ metadata/tx/polygons/fov) | ✅ |
+| 3 | Cervilla — XeniumMT & 5K (18000256) | [#34](https://github.com/PeterPonyu/factorgraph-st/issues/34) | `cell_feature_matrix.h5` per panel (377-gene MT + Human Prime 5K) + transcripts/boundaries | ✅ |
+| 4 | Dawo TLS (14620362) | [#35](https://github.com/PeterPonyu/factorgraph-st/issues/35) | `10x_Visium/<sample>/raw_feature_bc_matrix/` (+ `filtered_` + `spatial/`), 8 sections | ✅ |
+| 5 | GSE175540 RCC | [#36](https://github.com/PeterPonyu/factorgraph-st/issues/36) | per-GSM `*_filtered_feature_bc_matrix.h5` inside `GSE175540_RAW.tar` (24 sections, FFPE+FF) | ✅ |
+| 6 | HEST-1k cancer subset | [#37](https://github.com/PeterPonyu/factorgraph-st/issues/37) | `st/*.h5ad` → `adata.X` raw counts (raw-count QC annotations present; assert int at load) | ✅ |
+| 7 | Xenium Breast (Janesick) | [#38](https://github.com/PeterPonyu/factorgraph-st/issues/38) | `*_cell_feature_matrix.h5` (10x bundle, Rep1/Rep2; GEO GSE243280 mirror) | ✅ |
+| 8 | GSE293199 TNBC Xenium | [#39](https://github.com/PeterPonyu/factorgraph-st/issues/39) | `cell_feature_matrix.h5` inside nested `*_Xenium_outs.tar.gz` in `GSE293199_RAW.tar` | ✅ ⚠️ single ~14.6 GB tarball (no trivial 3 GB subset) |
+
+No Tier A cohort failed verification, so **no replacements were required**. One
+provenance caveat to carry into the loaders: GSE293199 ships a single
+~14.6 GB nested `*_Xenium_outs.tar.gz`, so the loader must download the full outs
+and extract `cell_feature_matrix.h5` (the registry's "subset ~3 GB" is optimistic).
+
+### New cohorts (extended validation)
+
+| # | Dataset | Accession | Platform | Tissue / disease | Raw-count artifact (verified) | Issue | Fit for cross-section factors |
+|---|---------|-----------|----------|------------------|-------------------------------|-------|-------------------------------|
+| E1 | **Wu 2021 breast cancer Visium** | Zenodo **4739739** | Visium v1 | human breast cancer (multi-subtype) | `raw_count_matrices.tar.gz` (252.9 MB) + `spatial.tar.gz` | [#42](https://github.com/PeterPonyu/factorgraph-st/issues/42) | Independent multi-section breast Visium; with Tier A #1/#7/#8 enables cross-study/cross-platform conserved breast-tumour factor tests. |
+| E2 | **Ji 2020 cutaneous SCC ST** | GEO **GSE144240** | legacy ST array | cutaneous SCC — multi-patient, tumor + matched normal | `*_stdata.tsv.gz` + `*_spot_data-selection-*.tsv.gz` in `GSE144240_RAW.tar` | [#43](https://github.com/PeterPonyu/factorgraph-st/issues/43) | Tumor-vs-normal + patient-private factor structure; adds legacy-ST platform breadth; paired scRNA for factor validation. |
+
+### Raw-count hardening — DLPFC (Tier B)
+
+The Tier B **DLPFC 12-section** entry currently loads the figshare object whose `X`
+is *normalized* (raw UMIs kept only in `.raw`). Issue
+[#41](https://github.com/PeterPonyu/factorgraph-st/issues/41) hardens its
+provenance to a **direct raw-count source**: `spatialLIBD::fetch_data("spe")` exposes
+a `counts` assay of raw integer 10x counts, and the spatialLIBD project also
+distributes per-sample `h5_raw` / `h5_filtered` Space Ranger matrices — preferable
+to a normalized-X object under the raw-counts-only policy. This augments the
+existing Tier B DLPFC row rather than adding a new cohort.
