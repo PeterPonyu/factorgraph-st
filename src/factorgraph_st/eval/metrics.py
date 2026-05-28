@@ -55,7 +55,13 @@ def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, secti
 
 
 def morans_i(values: np.ndarray, edges: np.ndarray) -> float:
-    """Compute Moran's I on graph edges for numeric labels or scores."""
+    """Compute Moran's I on graph edges for a numeric score.
+
+    Note: ``morans_i`` is mean-centering and assumes ``values`` is a numeric
+    score. Feeding it integer cluster label codes makes the result depend
+    on the specific code assigned to each cluster (relabel-sensitive).
+    For categorical labels, use :func:`label_invariant_cluster_coherence`.
+    """
     x = values.astype(np.float64)
     n = x.size
     if n == 0 or edges.size == 0:
@@ -67,6 +73,27 @@ def morans_i(values: np.ndarray, edges: np.ndarray) -> float:
     src, dst = edges
     w = src.size
     return float((n / w) * np.sum(centered[src] * centered[dst]) / denom)
+
+
+def label_invariant_cluster_coherence(labels: np.ndarray, edges: np.ndarray) -> float:
+    """Label-invariant cluster-coherence metric for categorical cluster labels.
+
+    Computes the mean Moran's I across one-hot indicator vectors per class:
+    for each class ``c`` present in ``labels``, treat ``1[labels == c]`` as a
+    numeric score and compute :func:`morans_i`; return the mean across
+    classes.
+
+    This is invariant under any bijective relabel: the *set* of indicator
+    vectors does not depend on the integer codes assigned to clusters, so
+    permuting labels (e.g., swapping 0 ↔ 1) leaves the metric unchanged.
+    """
+    if labels.size == 0 or edges.size == 0:
+        return 0.0
+    classes = np.unique(labels)
+    if classes.size == 0:
+        return 0.0
+    scores = [morans_i((labels == c).astype(np.float64), edges) for c in classes]
+    return float(np.mean(scores))
 
 
 def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
