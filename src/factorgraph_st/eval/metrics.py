@@ -79,8 +79,7 @@ def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> flo
     true_vals, true_inv = np.unique(labels_true, return_inverse=True)
     pred_vals, pred_inv = np.unique(labels_pred, return_inverse=True)
     table = np.zeros((true_vals.size, pred_vals.size), dtype=np.int64)
-    for i in range(n):
-        table[true_inv[i], pred_inv[i]] += 1
+    np.add.at(table, (true_inv.ravel(), pred_inv.ravel()), 1)
     sum_comb = _comb2(table).sum()
     row_comb = _comb2(table.sum(axis=1)).sum()
     col_comb = _comb2(table.sum(axis=0)).sum()
