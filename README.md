@@ -13,6 +13,8 @@ The project centers on a future model that combines graph neural encoders with n
 
 These repositories are treated as prior-art baselines. FactorGraph-ST must keep its own naming, APIs, prose, figures, schemas, and claims independent.
 
+Permitted locations for INSPIRE/HarveST mentions are documented in [`docs/ALLOWED_BASELINE_CONTEXTS.md`](docs/ALLOWED_BASELINE_CONTEXTS.md). References outside those locations are blocked by CI.
+
 ## First-pass repository scope
 
 - Baseline provenance lives in `BASELINE_REFERENCES.md`.
