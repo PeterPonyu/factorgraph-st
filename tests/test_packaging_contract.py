@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pathlib
-import tomllib
+
+try:
+    import tomllib
+except ImportError:  # Python < 3.11
+    import tomli as tomllib
 
 
 def test_numpy_is_runtime_dependency_for_numpy_importing_modules():
