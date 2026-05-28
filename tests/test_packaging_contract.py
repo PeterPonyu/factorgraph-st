@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import pathlib
-import tomllib
+try:
+    import tomllib  # Python >=3.11
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # Python 3.10
 
 
 def test_numpy_is_runtime_dependency_for_numpy_importing_modules():
