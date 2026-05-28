@@ -17,7 +17,7 @@ class SynthInstance:
     X: np.ndarray          # (n_spots, n_genes) float32
     coords: np.ndarray     # (n_spots, 2) float32
     section_id: np.ndarray # (n_spots,) int64
-    edges: np.ndarray      # (2, n_spots * k_nn) int64
+    edges: np.ndarray      # (2, n_edges) int64
     W: np.ndarray          # (n_genes, K_shared + K_private) float32, >= 0
     Z_shared: np.ndarray   # (n_spots, K_shared) float32, >= 0
     Z_private: np.ndarray  # (n_spots, K_private) float32, >= 0
@@ -65,7 +65,12 @@ def generate_instance(
     coords = rng.uniform(0.0, 1.0, size=(n_spots, 2)).astype(np.float32)
     edges = _build_knn_edges_per_section(coords, section_id, k=k_nn)
 
-    domain_id = (np.argmax(Z_shared, axis=1) % max(n_domains, 1)).astype(np.int64)
+    domain_id = _assign_spatial_domains(
+        coords=coords,
+        section_id=section_id,
+        n_domains=n_domains,
+        seed=seed,
+    )
 
     return SynthInstance(
         X=X,
@@ -82,16 +87,46 @@ def generate_instance(
 def _build_knn_edges_per_section(
     coords: np.ndarray, section_id: np.ndarray, k: int
 ) -> np.ndarray:
+    if k < 0:
+        raise ValueError(f"k_nn must be non-negative; got {k}")
+    if k == 0 or coords.shape[0] == 0:
+        return np.empty((2, 0), dtype=np.int64)
+
     src_chunks: list[np.ndarray] = []
     dst_chunks: list[np.ndarray] = []
     for s in np.unique(section_id):
         idx = np.where(section_id == s)[0]
         pts = coords[idx]
+        if pts.shape[0] < 2:
+            continue
+        section_k = min(k, pts.shape[0] - 1)
         d2 = np.sum((pts[:, None, :] - pts[None, :, :]) ** 2, axis=-1)
         np.fill_diagonal(d2, np.inf)
-        nn = np.argpartition(d2, k, axis=1)[:, :k]
-        rows = np.repeat(np.arange(pts.shape[0]), k)
+        nn = np.argpartition(d2, section_k - 1, axis=1)[:, :section_k]
+        rows = np.repeat(np.arange(pts.shape[0]), section_k)
         cols = nn.flatten()
         src_chunks.append(idx[rows])
         dst_chunks.append(idx[cols])
+    if not src_chunks:
+        return np.empty((2, 0), dtype=np.int64)
     return np.stack([np.concatenate(src_chunks), np.concatenate(dst_chunks)]).astype(np.int64)
+
+
+def _assign_spatial_domains(
+    coords: np.ndarray, section_id: np.ndarray, n_domains: int, seed: int
+) -> np.ndarray:
+    """Assign deterministic spatial domains independent of factor count.
+
+    Domains are quantile bins of a section-aware spatial score. This produces up
+    to ``n_domains`` non-empty labels whenever enough spots are available.
+    """
+    if n_domains <= 0 or coords.shape[0] == 0:
+        return np.zeros(coords.shape[0], dtype=np.int64)
+    n_labels = min(int(n_domains), coords.shape[0])
+    rng = np.random.default_rng(seed)
+    weights = rng.normal(size=2)
+    score = coords @ weights + 0.01 * section_id.astype(np.float32)
+    order = np.argsort(score, kind="mergesort")
+    labels = np.empty(coords.shape[0], dtype=np.int64)
+    labels[order] = np.arange(coords.shape[0], dtype=np.int64) * n_labels // coords.shape[0]
+    return labels

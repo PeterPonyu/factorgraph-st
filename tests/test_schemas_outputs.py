@@ -91,3 +91,57 @@ def test_domain_id_negative_fails():
     kw["domain_id"] = np.array([-1, 0, 0, 0, 0, 0], dtype=np.int64)
     with pytest.raises(SchemaError, match="non-negative"):
         validate_outputs(**kw)
+
+
+@pytest.mark.parametrize("name", ["W", "Z_shared", "Z_private"])
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_factor_outputs_must_be_finite(name, bad):
+    kw = _ok()
+    kw[name] = kw[name].copy()
+    kw[name][0, 0] = bad
+    with pytest.raises(SchemaError, match=f"{name} must be finite"):
+        validate_outputs(**kw)
+
+
+def test_Z_shared_wrong_dtype():
+    kw = _ok()
+    kw["Z_shared"] = kw["Z_shared"].astype(np.float64)
+    with pytest.raises(SchemaError, match="Z_shared must be float32"):
+        validate_outputs(**kw)
+
+
+def test_Z_private_wrong_dtype():
+    kw = _ok()
+    kw["Z_private"] = kw["Z_private"].astype(np.float64)
+    with pytest.raises(SchemaError, match="Z_private must be float32"):
+        validate_outputs(**kw)
+
+
+@pytest.mark.parametrize("name", ["H", "W", "Z_shared", "Z_private"])
+def test_output_matrix_ndim_branches(name):
+    kw = _ok()
+    kw[name] = np.zeros((kw[name].shape[0], kw[name].shape[1], 1), dtype=np.float32)
+    with pytest.raises(SchemaError, match=f"{name} must be"):
+        validate_outputs(**kw)
+
+
+def test_W_row_count_mismatch():
+    kw = _ok()
+    kw["W"] = np.ones((kw["n_genes"] - 1, 3), dtype=np.float32)
+    with pytest.raises(SchemaError, match="W must be"):
+        validate_outputs(**kw)
+
+
+def test_Z_row_count_mismatches():
+    for name in ("Z_shared", "Z_private"):
+        kw = _ok()
+        kw[name] = np.ones((kw["n_spots"] - 1, kw[name].shape[1]), dtype=np.float32)
+        with pytest.raises(SchemaError, match=f"{name} must be"):
+            validate_outputs(**kw)
+
+
+def test_domain_id_wrong_shape():
+    kw = _ok()
+    kw["domain_id"] = np.zeros((kw["n_spots"], 1), dtype=np.int64)
+    with pytest.raises(SchemaError, match="domain_id must be"):
+        validate_outputs(**kw)
