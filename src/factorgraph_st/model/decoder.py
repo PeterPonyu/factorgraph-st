@@ -78,7 +78,10 @@ def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
     if Z.shape[0] == 0:
-        return np.empty((X.shape[1], Z.shape[1]), dtype=np.float32)
+        # Empty input: return deterministic, finite, nonnegative zeros.
+        # np.empty would leak uninitialized memory (often non-finite or
+        # negative), violating the nonnegative-loadings contract.
+        return np.zeros((X.shape[1], Z.shape[1]), dtype=np.float32)
     coef, *_ = np.linalg.lstsq(Z.astype(np.float64), X.astype(np.float64), rcond=None)
     return np.clip(coef.T, 0.0, None).astype(np.float32)
 
