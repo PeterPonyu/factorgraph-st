@@ -69,3 +69,56 @@ def test_edges_int32_rejected():
     kw["edges"] = np.zeros((2, 3), dtype=np.int32)
     with pytest.raises(SchemaError, match="edges must be int64"):
         validate_inputs(**kw)
+
+
+def test_X_nonfinite_rejected():
+    kw = _ok()
+    kw["X"] = kw["X"].copy()
+    kw["X"][0, 0] = np.nan
+    with pytest.raises(SchemaError, match="X must be finite"):
+        validate_inputs(**kw)
+
+
+def test_coords_nonfinite_rejected():
+    kw = _ok()
+    kw["coords"] = kw["coords"].copy()
+    kw["coords"][0, 0] = np.inf
+    with pytest.raises(SchemaError, match="coords must be finite"):
+        validate_inputs(**kw)
+
+
+def test_coords_n_spots_mismatch():
+    kw = _ok()
+    kw["coords"] = np.zeros((5, 2), dtype=np.float32)
+    with pytest.raises(SchemaError, match="coords n_spots"):
+        validate_inputs(**kw)
+
+
+def test_section_id_shape_mismatch():
+    kw = _ok()
+    kw["section_id"] = np.zeros((6, 1), dtype=np.int64)
+    with pytest.raises(SchemaError, match="section_id must be"):
+        validate_inputs(**kw)
+
+
+def test_edges_wrong_shape():
+    kw = _ok()
+    kw["edges"] = np.zeros((3, 2), dtype=np.int64)
+    with pytest.raises(SchemaError, match="edges must be"):
+        validate_inputs(**kw)
+
+
+def test_empty_edges_and_integer_section_variants_pass():
+    kw = _ok()
+    kw["section_id"] = np.zeros(6, dtype=np.uint32)
+    kw["edges"] = np.empty((2, 0), dtype=np.int64)
+    validate_inputs(**kw)
+
+
+def test_empty_inputs_pass():
+    validate_inputs(
+        X=np.empty((0, 4), dtype=np.float32),
+        coords=np.empty((0, 2), dtype=np.float32),
+        section_id=np.empty(0, dtype=np.int32),
+        edges=np.empty((2, 0), dtype=np.int64),
+    )

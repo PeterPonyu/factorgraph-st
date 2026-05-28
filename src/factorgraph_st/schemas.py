@@ -28,12 +28,16 @@ def validate_inputs(
         raise SchemaError(f"X must be 2D; got ndim={X.ndim}")
     if X.dtype != np.float32:
         raise SchemaError(f"X must be float32; got {X.dtype}")
+    if not np.isfinite(X).all():
+        raise SchemaError("X must be finite")
     n_spots = X.shape[0]
 
     if coords.ndim != 2 or coords.shape[1] != 2:
         raise SchemaError(f"coords must be (n_spots, 2); got shape={coords.shape}")
     if coords.dtype != np.float32:
         raise SchemaError(f"coords must be float32; got {coords.dtype}")
+    if not np.isfinite(coords).all():
+        raise SchemaError("coords must be finite")
     if coords.shape[0] != n_spots:
         raise SchemaError(f"coords n_spots={coords.shape[0]} != X n_spots={n_spots}")
 
@@ -69,6 +73,8 @@ def validate_outputs(
         raise SchemaError(f"W must be (n_genes, K); got shape={W.shape}")
     if W.dtype != np.float32:
         raise SchemaError(f"W must be float32; got {W.dtype}")
+    if not np.isfinite(W).all():
+        raise SchemaError("W must be finite")
     if (W < 0).any():
         raise SchemaError("W must be nonnegative")
 
@@ -76,6 +82,8 @@ def validate_outputs(
         raise SchemaError(f"Z_shared must be (n_spots, K_shared); got shape={Z_shared.shape}")
     if Z_shared.dtype != np.float32:
         raise SchemaError(f"Z_shared must be float32; got {Z_shared.dtype}")
+    if not np.isfinite(Z_shared).all():
+        raise SchemaError("Z_shared must be finite")
     if (Z_shared < 0).any():
         raise SchemaError("Z_shared must be nonnegative")
 
@@ -83,6 +91,8 @@ def validate_outputs(
         raise SchemaError(f"Z_private must be (n_spots, K_private); got shape={Z_private.shape}")
     if Z_private.dtype != np.float32:
         raise SchemaError(f"Z_private must be float32; got {Z_private.dtype}")
+    if not np.isfinite(Z_private).all():
+        raise SchemaError("Z_private must be finite")
     if (Z_private < 0).any():
         raise SchemaError("Z_private must be nonnegative")
 
