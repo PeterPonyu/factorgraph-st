@@ -89,7 +89,7 @@ def test_degenerate_inputs_not_perfect():
 
     A model that produces zero factors or a single recovered domain is *not*
     a perfect benchmark recovery; it is an uninformative degenerate run.
-    Cross-repo sibling: PeterPonyu/niche-lens-st#83 (PR #121).
+    See PR body for the cross-repo sibling reference.
     """
     import math
 
