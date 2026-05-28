@@ -25,12 +25,18 @@ def decode_factors(
     K_shared: int = 4,
     K_private: int = 2,
     n_domains: int = 5,
+    coords: np.ndarray | None = None,
+    seed: int = 0,
 ) -> FactorGraphOutputs:
     """Decode deterministic nonnegative factors from ``H`` and ``X``.
 
     This is a lightweight baseline implementation that satisfies the MVP schema:
     activations are rectified embeddings and loadings are least-squares estimates
     clipped to nonnegative values.
+
+    Spatial domains are assigned by a deterministic k-means pass on the
+    z-normalized joint feature ``[H | coords]``. Passing ``coords=None``
+    falls back to clustering on ``H`` alone (purely embedding-based).
     """
     if K_shared < 0 or K_private < 0:
         raise ValueError("K_shared and K_private must be non-negative")
@@ -42,7 +48,9 @@ def decode_factors(
     Z_shared = basis[:, :K_shared].astype(np.float32, copy=False)
     Z_private = basis[:, K_shared:].astype(np.float32, copy=False)
     W = _fit_nonnegative_loadings(X, basis).astype(np.float32, copy=False)
-    domain_id = _cluster_domains(H, n_domains).astype(np.int64, copy=False)
+    if coords is None:
+        coords = np.zeros((H.shape[0], 0), dtype=np.float32)
+    domain_id = _cluster_domains(H, coords, n_domains, seed=seed).astype(np.int64, copy=False)
     return FactorGraphOutputs(H=H, W=W, Z_shared=Z_shared, Z_private=Z_private, domain_id=domain_id)
 
 
@@ -59,7 +67,15 @@ def fit_transform(
 ) -> FactorGraphOutputs:
     """Encode inputs, decode nonnegative factors, and validate MVP outputs."""
     H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
-    outputs = decode_factors(X, H, K_shared=K_shared, K_private=K_private, n_domains=n_domains)
+    outputs = decode_factors(
+        X,
+        H,
+        K_shared=K_shared,
+        K_private=K_private,
+        n_domains=n_domains,
+        coords=coords,
+        seed=seed,
+    )
     validate_outputs(outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1])
     return outputs
 
@@ -86,12 +102,52 @@ def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
     return np.clip(coef.T, 0.0, None).astype(np.float32)
 
 
-def _cluster_domains(H: np.ndarray, n_domains: int) -> np.ndarray:
-    if H.shape[0] == 0:
-        return np.empty(0, dtype=np.int64)
-    n_labels = min(max(int(n_domains), 1), H.shape[0])
-    score = H[:, 0] if H.shape[1] else np.arange(H.shape[0], dtype=np.float32)
-    order = np.argsort(score, kind="mergesort")
-    labels = np.empty(H.shape[0], dtype=np.int64)
-    labels[order] = np.arange(H.shape[0], dtype=np.int64) * n_labels // H.shape[0]
-    return labels
+def _cluster_domains(
+    H: np.ndarray,
+    coords: np.ndarray,
+    n_domains: int,
+    *,
+    seed: int = 0,
+    n_init: int = 4,
+    max_iter: int = 100,
+) -> np.ndarray:
+    """Assign domain ids by deterministic k-means on z-normalized ``[H | coords]``.
+
+    The previous implementation ignored ``coords`` and partitioned by rank of
+    ``H[:, 0]``, producing strip patterns rather than spatial domains. This
+    pass uses an actual clustering on the joint feature, with ``n_init``
+    restarts picking the lowest-inertia assignment.
+    """
+    n = H.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    k = max(1, min(int(n_domains), n))
+    if k == 1:
+        return np.zeros(n, dtype=np.int64)
+
+    parts = []
+    for arr in (H, coords):
+        if arr.size == 0 or arr.shape[1] == 0:
+            continue
+        a = np.asarray(arr, dtype=np.float64)
+        parts.append((a - a.mean(0, keepdims=True)) / np.maximum(a.std(0, keepdims=True), 1e-6))
+    X = np.concatenate(parts, axis=1) if parts else np.zeros((n, 1), dtype=np.float64)
+
+    rng = np.random.default_rng(seed)
+    best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
+    for _ in range(max(1, n_init)):
+        centers = X[rng.choice(n, size=k, replace=False)].copy()
+        labels = np.full(n, -1, dtype=np.int64)
+        for _ in range(max_iter):
+            dists = ((X[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+            new_labels = dists.argmin(axis=1).astype(np.int64)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for c in range(k):
+                mask = labels == c
+                centers[c] = X[mask].mean(0) if mask.any() else X[int(np.argmax(dists.min(1)))]
+        inertia = float(((X - centers[labels]) ** 2).sum())
+        if inertia < best_inertia:
+            best_inertia, best_labels = inertia, labels
+    return best_labels
