@@ -20,7 +20,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from factorgraph_st.eval.metrics import label_invariant_cluster_coherence
+from factorgraph_st.eval.metrics import (
+    adjusted_rand_index,
+    label_invariant_cluster_coherence,
+    matched_factor_correlation,
+)
 
 
 def _toy_graph_with_clusters():
@@ -78,6 +82,36 @@ def test_label_invariant_cluster_coherence_empty_inputs():
     assert label_invariant_cluster_coherence(
         np.array([0, 1, 2], dtype=np.int64), np.zeros((2, 0), dtype=np.int64)
     ) == 0.0
+
+
+def test_degenerate_inputs_not_perfect():
+    """Regression for #79: empty/degenerate inputs must NOT silently score 1.0.
+
+    A model that produces zero factors or a single recovered domain is *not*
+    a perfect benchmark recovery; it is an uninformative degenerate run.
+    Cross-repo sibling: PeterPonyu/niche-lens-st#83 (PR #121).
+    """
+    import math
+
+    # matched_factor_correlation: empty factor matrices -> NaN, not 1.0.
+    empty = np.zeros((0, 0), dtype=np.float32)
+    score_empty = matched_factor_correlation(empty, empty)
+    assert math.isnan(score_empty), (
+        f"empty factor matrix must return NaN, got {score_empty!r}"
+    )
+
+    # adjusted_rand_index: n < 2 -> NaN, not 1.0.
+    score_single = adjusted_rand_index(np.array([0]), np.array([5]))
+    assert math.isnan(score_single), (
+        f"single-spot ARI must be NaN, got {score_single!r}"
+    )
+
+    # adjusted_rand_index: all-one-cluster (denom == 0) -> NaN, not 1.0.
+    labels = np.array([0, 0, 0, 0])
+    score_collapsed = adjusted_rand_index(labels, np.array([7, 7, 7, 7]))
+    assert math.isnan(score_collapsed), (
+        f"all-one-cluster ARI must be NaN, got {score_collapsed!r}"
+    )
 
 
 def test_label_invariance_on_real_synth_instance():
