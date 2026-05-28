@@ -60,7 +60,11 @@ def generate_instance(
 
     Z = np.concatenate([Z_shared, Z_private], axis=1)
     mean = Z @ W.T
-    X = (mean + rng.normal(0.0, noise_sigma, size=mean.shape)).astype(np.float32)
+    # Clip additive Gaussian noise so X stays on the nonneg half-line.
+    # The nonnegative mean (W, Z >= 0 by construction) plus centered noise
+    # would otherwise push entries below 0, silently violating the count-data
+    # contract that downstream models / validators assume.
+    X = np.clip(mean + rng.normal(0.0, noise_sigma, size=mean.shape), 0.0, None).astype(np.float32)
 
     coords = rng.uniform(0.0, 1.0, size=(n_spots, 2)).astype(np.float32)
     edges = _build_knn_edges_per_section(coords, section_id, k=k_nn)
