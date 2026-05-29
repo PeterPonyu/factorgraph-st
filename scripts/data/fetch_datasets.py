@@ -314,6 +314,25 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(0.25 * GB),
             notes="Independent multi-section breast Visium for cross-study conserved-factor tests.",
         ),
+        Dataset(
+            id="ji_2020_scc_st",
+            title="Ji 2020 cutaneous SCC (legacy ST array)",
+            platform="legacy ST array",
+            tier="extended",
+            accession="GEO GSE144240",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE144240",
+            citation_key="ji2020",
+            issues=(43,),
+            raw_count_policy="*_stdata.tsv.gz + *_spot_data-selection-*.tsv.gz in GSE144240_RAW.tar; raw int counts",
+            contract={
+                **_CONTRACT_VISIUM,
+                "X": "(n_spots, n_genes) float32 raw counts from *_stdata.tsv.gz",
+                "edges": "(2, n_edges) int64 generic kNN (legacy ST grid) via build_spatial_graph",
+            },
+            source_kind="geo",
+            approx_bytes=int(0.5 * GB),
+            notes="Tumor-vs-normal + patient-private factor structure; legacy-ST breadth.",
+        ),
     )
 }
 

@@ -18,6 +18,7 @@ only.
 | `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
 | `maynard2021` | dlpfc_maynard_2021 | #41, #133 |
 | `wu2021` | wu_2021_breast_visium | #42 |
+| `ji2020` | ji_2020_scc_st | #43 |
 | `squidpy2022` | visium_mouse_brain_pair | #44 |
 | `moffitt2018` | merfish_hypothalamus_shared | #45 |
 
@@ -93,6 +94,13 @@ cancers*, *Nature Genetics* 53, 1334–1347.
 DOI [10.1038/s41588-021-00911-1](https://doi.org/10.1038/s41588-021-00911-1).
 Data: Zenodo [4739739](https://zenodo.org/records/4739739)
 (`raw_count_matrices.tar.gz` + `spatial.tar.gz`). Tracks #42.
+
+### `ji2020` — Ji 2020 cutaneous SCC (legacy ST)
+Ji et al. 2020, *Multimodal Analysis of Composition and Spatial Architecture in
+Human Squamous Cell Carcinoma*, *Cell* 182, 497–514.
+DOI [10.1016/j.cell.2020.05.039](https://doi.org/10.1016/j.cell.2020.05.039).
+Data: GEO [GSE144240](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE144240).
+Tracks #43.
 
 ---
 

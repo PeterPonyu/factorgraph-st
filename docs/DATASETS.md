@@ -283,6 +283,7 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 | `gse293199_tnbc_xenium` | TNBC Xenium | A | [#39](https://github.com/PeterPonyu/factorgraph-st/issues/39) | stub (URL UNVERIFIED) |
 | `dlpfc_maynard_2021` | DLPFC 12-section | B | [#41](https://github.com/PeterPonyu/factorgraph-st/issues/41), [#133](https://github.com/PeterPonyu/factorgraph-st/issues/133) | stub (URL UNVERIFIED) |
 | `wu_2021_breast_visium` | Wu 2021 breast Visium | extended | [#42](https://github.com/PeterPonyu/factorgraph-st/issues/42) | stub (URL UNVERIFIED) |
+| `ji_2020_scc_st` | Ji 2020 SCC legacy ST | extended | [#43](https://github.com/PeterPonyu/factorgraph-st/issues/43) | stub (URL UNVERIFIED) |
 | `visium_mouse_brain_pair` | Visium mouse brain pair | B | [#44](https://github.com/PeterPonyu/factorgraph-st/issues/44) | **wired** (squidpy) |
 | `merfish_hypothalamus_shared` | MERFISH hypothalamus | B | [#45](https://github.com/PeterPonyu/factorgraph-st/issues/45) | **wired** (squidpy; raw via Dryad UNVERIFIED) |
 
