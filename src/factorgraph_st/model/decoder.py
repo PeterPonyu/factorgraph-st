@@ -26,6 +26,8 @@ def decode_factors(
     K_private: int = 2,
     n_domains: int = 5,
     coords: np.ndarray | None = None,
+    edges: np.ndarray | None = None,
+    section_id: np.ndarray | None = None,
     seed: int = 0,
 ) -> FactorGraphOutputs:
     """Decode deterministic nonnegative factors from ``H`` and ``X``.
@@ -33,6 +35,12 @@ def decode_factors(
     This is a lightweight baseline implementation that satisfies the MVP schema:
     activations are rectified embeddings and loadings are least-squares estimates
     clipped to nonnegative values.
+
+    When ``section_id`` is provided, each private factor column ``k`` is
+    section-gated (zeroed outside section ``unique(section_id)[k % n_sections]``)
+    so the decoder's ``Z_private`` mirrors the generator's section-private
+    semantics — train and inference share the same conditioning instead of
+    silently dropping ``section_id`` on the floor.
 
     Spatial domains are assigned by a deterministic k-means pass on the
     z-normalized joint feature ``[H | coords]``. Passing ``coords=None``
@@ -47,10 +55,16 @@ def decode_factors(
     basis = _positive_basis(H, K_total)
     Z_shared = basis[:, :K_shared].astype(np.float32, copy=False)
     Z_private = basis[:, K_shared:].astype(np.float32, copy=False)
-    W = _fit_nonnegative_loadings(X, basis).astype(np.float32, copy=False)
+    if section_id is not None and Z_private.shape[1] > 0:
+        Z_private = _section_gate_private(Z_private, section_id)
+    Z_full = np.concatenate([Z_shared, Z_private], axis=1)
+    W = _fit_nonnegative_loadings(X, Z_full).astype(np.float32, copy=False)
+    Z_shared, Z_private, W = _apply_canonical_gauge(Z_shared, Z_private, W)
     if coords is None:
         coords = np.zeros((H.shape[0], 0), dtype=np.float32)
-    domain_id = _cluster_domains(H, coords, n_domains, seed=seed).astype(np.int64, copy=False)
+    domain_id = _cluster_domains(
+        H, coords, n_domains, edges=edges, seed=seed
+    ).astype(np.int64, copy=False)
     return FactorGraphOutputs(H=H, W=W, Z_shared=Z_shared, Z_private=Z_private, domain_id=domain_id)
 
 
@@ -65,7 +79,15 @@ def fit_transform(
     n_domains: int = 5,
     seed: int = 0,
 ) -> FactorGraphOutputs:
-    """Encode inputs, decode nonnegative factors, and validate MVP outputs."""
+    """Encode inputs, decode nonnegative factors, and validate MVP outputs.
+
+    Pins global RNG state via ``set_seed(seed)`` before encoding so the
+    factor-fit pipeline is reproducible end-to-end (closes #87 for the
+    model side; the generator side is closed by the matching ``set_seed``
+    call in ``synth.generate_instance``).
+    """
+    from factorgraph_st.repro import set_seed
+    set_seed(seed)
     H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
     outputs = decode_factors(
         X,
@@ -74,22 +96,66 @@ def fit_transform(
         K_private=K_private,
         n_domains=n_domains,
         coords=coords,
+        edges=edges,
+        section_id=section_id,
         seed=seed,
     )
-    validate_outputs(outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1])
+    validate_outputs(
+        outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1]
+    )
     return outputs
 
 
 def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
+    """Convert ``H`` into a nonnegative per-column-normalized factor basis.
+
+    Constant or near-constant columns (``std < 1e-12``) are explicitly zeroed
+    rather than divided by an eps floor. The previous ``raw / max(scale, 1e-6)
+    + 1e-6`` formulation amplified microscopic input variation by up to ~1e6×
+    on near-constant columns and left a 1e-6 bias term on truly constant
+    columns — silently corrupting downstream loadings and clustering with a
+    fake signal. See #85.
+    """
     if H.shape[0] == 0:
         return np.empty((0, n_components), dtype=np.float32)
-    if H.shape[1] >= n_components:
-        raw = H[:, :n_components]
-    else:
-        raw = np.pad(H, ((0, 0), (0, n_components - H.shape[1])))
+    if H.shape[1] < n_components:
+        # Closes #69. Previously H was zero-padded; the std=0 columns then
+        # collapsed to the constant 1e-6, silently producing dead factors that
+        # still pass validate_outputs (nonneg + finite). Refuse the misuse
+        # instead so callers learn at the boundary.
+        raise ValueError(
+            f"H.shape[1]={H.shape[1]} < n_components={n_components}; "
+            "require d >= K_shared + K_private so every factor is backed by a "
+            "real embedding column (no zero-padded, constant Z_* columns)."
+        )
+    raw = H[:, :n_components]
     raw = raw - raw.min(axis=0, keepdims=True)
     scale = raw.std(axis=0, keepdims=True)
-    return (raw / np.maximum(scale, 1e-6) + 1e-6).astype(np.float32)
+    low_var = scale < 1e-12
+    safe_scale = np.where(low_var, 1.0, scale)
+    basis = raw / safe_scale
+    # Zero out columns that carried no information so the eps floor cannot
+    # propagate as a fake bias term.
+    basis = np.where(np.broadcast_to(low_var, basis.shape), 0.0, basis)
+    return basis.astype(np.float32)
+
+
+def _section_gate_private(Z_private: np.ndarray, section_id: np.ndarray) -> np.ndarray:
+    """Zero out each private factor outside its assigned section.
+
+    Mirrors the synthetic generator: private column ``k`` is active only on
+    section ``unique(section_id)[k % n_sections]``. Closes #50 — without this,
+    ``decode_factors`` ignores ``section_id`` and ``Z_private`` is identical
+    across permuted section assignments.
+    """
+    sections = np.unique(section_id)
+    if sections.size == 0:
+        return Z_private
+    gated = Z_private.copy()
+    for k in range(gated.shape[1]):
+        s = sections[k % sections.size]
+        gated[section_id != s, k] = 0.0
+    return gated
 
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
@@ -166,21 +232,51 @@ def _nnls(A: np.ndarray, b: np.ndarray, *, tol: float = 1e-10, max_iter: int | N
     return x
 
 
+def _apply_canonical_gauge(
+    Z_shared: np.ndarray, Z_private: np.ndarray, W: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fix the factor scale gauge of ``X ~= [Z_shared | Z_private] @ Wt``.
+
+    The factorization is invariant to ``Z[:, j] -> Z[:, j] * s_j`` together
+    with ``W[:, j] -> W[:, j] / s_j`` for any ``s_j > 0``. We pin the gauge by
+    choosing ``s_j = ||W[:, j]||_2`` so every loading column has unit L2 norm
+    and the scale is folded into the matching activation column. This is a
+    gauge-only transform: ``Z @ W.T`` is unchanged. Nonnegativity is preserved
+    because all ``s_j >= 0``; zero-norm columns are left untouched (``s_j = 1``)
+    to avoid division by zero.
+    """
+    norms = np.linalg.norm(W, axis=0)
+    scale = np.where(norms > 0.0, norms, 1.0).astype(np.float32)
+    W_n = (W / scale).astype(np.float32)
+    k_shared = Z_shared.shape[1]
+    Z_shared_n = (Z_shared * scale[:k_shared]).astype(np.float32)
+    Z_private_n = (Z_private * scale[k_shared:]).astype(np.float32)
+    return Z_shared_n, Z_private_n, W_n
+
+
 def _cluster_domains(
     H: np.ndarray,
     coords: np.ndarray,
     n_domains: int,
     *,
+    edges: np.ndarray | None = None,
     seed: int = 0,
     n_init: int = 4,
     max_iter: int = 100,
 ) -> np.ndarray:
-    """Assign domain ids by deterministic k-means on z-normalized ``[H | coords]``.
+    """Assign domain ids over the z-normalized joint feature ``[H | coords]``.
 
-    The previous implementation ignored ``coords`` and partitioned by rank of
-    ``H[:, 0]``, producing strip patterns rather than spatial domains. This
-    pass uses an actual clustering on the joint feature, with ``n_init``
-    restarts picking the lowest-inertia assignment.
+    When ``edges`` is provided, domains are assigned by graph-aware clustering:
+    each connected component of ``edges`` is collapsed to its centroid and the
+    centroids are clustered (see :func:`_cluster_components`), guaranteeing that
+    every connected component receives a single label. When ``edges`` is None or
+    empty, this falls back to a deterministic per-spot k-means on the same
+    z-normalized feature.
+
+    Closes #101 / extends the #75 fix: per-spot k-means on ``[H | coords]`` alone
+    ignores the spatial graph, so coord-overlapping regions are mixed near chance
+    even when the graph cleanly separates them. The component-centroid path keeps
+    graph-connected spots in the same domain.
     """
     n = H.shape[0]
     if n == 0:
@@ -197,6 +293,84 @@ def _cluster_domains(
         parts.append((a - a.mean(0, keepdims=True)) / np.maximum(a.std(0, keepdims=True), 1e-6))
     X = np.concatenate(parts, axis=1) if parts else np.zeros((n, 1), dtype=np.float64)
 
+    if edges is not None and edges.size > 0:
+        # Graph-aware path: cluster connected-component centroids. (Replaces the
+        # per-spot k-means below, which is only the no-graph fallback.)
+        return _cluster_components(X, edges, k, seed, n_init, max_iter)
+
+    rng = np.random.default_rng(seed)
+    best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
+    for _ in range(max(1, n_init)):
+        centers = X[rng.choice(n, size=k, replace=False)].copy()
+        labels = np.full(n, -1, dtype=np.int64)
+        for _ in range(max_iter):
+            dists = ((X[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+            new_labels = dists.argmin(axis=1).astype(np.int64)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for c in range(k):
+                mask = labels == c
+                centers[c] = X[mask].mean(0) if mask.any() else X[int(np.argmax(dists.min(1)))]
+        inertia = float(((X - centers[labels]) ** 2).sum())
+        if inertia < best_inertia:
+            best_inertia, best_labels = inertia, labels
+    return best_labels
+
+
+def _cluster_components(
+    X: np.ndarray, edges: np.ndarray, k: int, seed: int, n_init: int, max_iter: int
+) -> np.ndarray:
+    """Graph-aware clustering: k-means over connected-component centroids.
+
+    Per-spot k-means on ``[H | coords]`` is dominated by the random-projection
+    ``H`` and can land a near-chance partition inside spatially coherent
+    regions, so post-hoc label smoothing (which only flips minorities) gets
+    stuck when both regions share the same k-means majority. Instead, we
+    collapse each connected component of ``edges`` to its centroid and
+    cluster the centroids — every component is guaranteed to receive one
+    label, drawn from a k-means run over a much cleaner ``n_components``-by-
+    feature matrix.
+    """
+    n = X.shape[0]
+    roots = _connected_components(edges, n)
+    unique_roots, comp_idx = np.unique(roots, return_inverse=True)
+    n_comp = unique_roots.size
+
+    centroids = np.zeros((n_comp, X.shape[1]), dtype=np.float64)
+    for i in range(n_comp):
+        centroids[i] = X[comp_idx == i].mean(axis=0)
+    if n_comp <= k:
+        # Each component gets its own label (with leftover labels unused).
+        comp_labels = np.arange(n_comp, dtype=np.int64) % k
+    else:
+        comp_labels = _kmeans(centroids, k, seed, n_init, max_iter)
+    return comp_labels[comp_idx].astype(np.int64)
+
+
+def _connected_components(edges: np.ndarray, n: int) -> np.ndarray:
+    """Union-find connected components for the (symmetrized) edge list."""
+    src, dst = edges
+    parent = np.arange(n, dtype=np.int64)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = int(parent[x])
+        return x
+
+    for s, d in zip(src.tolist(), dst.tolist(), strict=True):
+        rs, rd = find(s), find(d)
+        if rs != rd:
+            parent[rs] = rd
+    return np.array([find(i) for i in range(n)], dtype=np.int64)
+
+
+def _kmeans(
+    X: np.ndarray, k: int, seed: int, n_init: int, max_iter: int
+) -> np.ndarray:
+    """Plain k-means returning integer labels; deterministic per ``seed``."""
+    n = X.shape[0]
     rng = np.random.default_rng(seed)
     best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
     for _ in range(max(1, n_init)):
