@@ -135,3 +135,28 @@ def test_label_invariance_on_real_synth_instance():
         f"label-invariance must hold on real synth graph; "
         f"got base={base} vs permuted={permuted}"
     )
+
+
+def test_recovery_overcomplete_factors():
+    """#46: when estimated factors > truth factors, a perfect match outside the
+    first ``n_truth`` estimated columns must still score ~1.0 on BOTH paths."""
+    rng = np.random.default_rng(0)
+
+    # Brute-force path (<= 8 columns): 1 truth factor, 4 estimated, col 3 == truth.
+    truth = rng.normal(size=(50, 1)).astype(np.float32)
+    est = rng.normal(size=(50, 4)).astype(np.float32)
+    est[:, 3] = truth[:, 0]
+    assert matched_factor_correlation(est, truth) > 0.99
+
+    # Greedy path (> 8 columns): same relationship, perfect copy in the last col.
+    est2 = rng.normal(size=(50, 9)).astype(np.float32)
+    est2[:, 8] = truth[:, 0]
+    assert matched_factor_correlation(est2, truth) > 0.99
+
+
+def test_recovery_square_unaffected():
+    """Square case keeps the existing one-to-one matching semantics."""
+    rng = np.random.default_rng(1)
+    truth = rng.normal(size=(40, 3)).astype(np.float32)
+    est = truth[:, ::-1].copy()  # same factors, permuted columns
+    assert matched_factor_correlation(est, truth) > 0.99
