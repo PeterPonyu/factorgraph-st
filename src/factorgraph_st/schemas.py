@@ -68,6 +68,8 @@ def validate_outputs(
         raise SchemaError(f"H must be (n_spots, d); got shape={H.shape}")
     if H.dtype != np.float32:
         raise SchemaError(f"H must be float32; got {H.dtype}")
+    if not np.isfinite(H).all():
+        raise SchemaError("H must be finite")
 
     if W.ndim != 2 or W.shape[0] != n_genes:
         raise SchemaError(f"W must be (n_genes, K); got shape={W.shape}")
