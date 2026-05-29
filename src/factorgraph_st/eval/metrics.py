@@ -52,6 +52,26 @@ def section_overlap(Z: np.ndarray, section_id: np.ndarray) -> np.ndarray:
     return out
 
 
+def factor_redundancy(Z: np.ndarray) -> float:
+    """Mean absolute off-diagonal correlation among estimated factors.
+
+    Quantifies *within-estimate* redundancy of the recovered factors (the
+    columns of ``Z = [Z_shared | Z_private]``). ``0.0`` means the factors are
+    mutually uncorrelated (well disentangled); values approaching ``1.0`` mean
+    near-duplicate factors (the same program reported multiple times).
+    Constant (zero-variance) factors contribute zero correlation, and fewer
+    than two factors returns ``0.0`` (no redundancy is possible).
+    """
+    if Z.ndim != 2:
+        raise ValueError("Z must be 2D")
+    k = Z.shape[1]
+    if k < 2:
+        return 0.0
+    corr = _abs_corr_matrix(Z, Z)
+    off_diagonal = float(corr.sum() - np.trace(corr))
+    return off_diagonal / (k * (k - 1))
+
+
 def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, section_id: np.ndarray) -> dict[str, float]:
     """Return section-spread summaries for shared and private activations."""
     shared = section_overlap(Z_shared, section_id)
