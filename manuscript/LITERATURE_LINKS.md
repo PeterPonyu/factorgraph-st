@@ -12,6 +12,7 @@ only.
 |---|---|---|
 | `cervilla2026` | cervilla_2026_visium, cervilla_2026_xenium_cosmx, cervilla_2026_xenium_mt_5k | #32–#34 |
 | `dawo_tls` | dawo_tls_visium | #35 |
+| `gse175540_rcc` | gse175540_rcc_visium | #36 |
 
 ---
 
@@ -29,6 +30,11 @@ Tracks issues #32–#34.
 Dawo et al., tertiary-lymphoid-structure carcinoma Visium (kidney + lung).
 Data: Zenodo [14620362](https://zenodo.org/records/14620362)
 (`TLS_VISIUM_USZ.zip`). Tracks #35.
+
+### `gse175540_rcc` — Renal cell carcinoma Visium (24 sections)
+Renal cell carcinoma Visium series (12 FFPE + 12 fresh-frozen). Data: GEO
+[GSE175540](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE175540).
+Tracks #36.
 
 ---
 

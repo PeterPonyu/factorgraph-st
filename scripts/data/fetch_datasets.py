@@ -181,6 +181,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(2.1 * GB),
             notes="8 cancer Visium sections, two organs + TLS annotation. Small/fast first integration.",
         ),
+        Dataset(
+            id="gse175540_rcc_visium",
+            title="GSE175540 (RCC Visium, 24 sections FFPE+FF)",
+            platform="Visium v1",
+            tier="A",
+            accession="GEO GSE175540",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE175540",
+            citation_key="gse175540_rcc",
+            issues=(36,),
+            raw_count_policy="per-GSM *_filtered_feature_bc_matrix.h5 inside GSE175540_RAW.tar; raw int counts",
+            contract=_CONTRACT_VISIUM,
+            source_kind="geo",
+            approx_bytes=1 * GB,
+            notes="Within-disease, cross-preservation (FFPE vs FF) section set.",
+        ),
     )
 }
 
