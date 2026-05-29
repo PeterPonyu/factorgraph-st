@@ -75,7 +75,15 @@ def fit_transform(
     n_domains: int = 5,
     seed: int = 0,
 ) -> FactorGraphOutputs:
-    """Encode inputs, decode nonnegative factors, and validate MVP outputs."""
+    """Encode inputs, decode nonnegative factors, and validate MVP outputs.
+
+    Pins global RNG state via ``set_seed(seed)`` before encoding so the
+    factor-fit pipeline is reproducible end-to-end (closes #87 for the
+    model side; the generator side is closed by the matching ``set_seed``
+    call in ``synth.generate_instance``).
+    """
+    from factorgraph_st.repro import set_seed
+    set_seed(seed)
     H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
     outputs = decode_factors(
         X,
