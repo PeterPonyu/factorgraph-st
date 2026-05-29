@@ -61,6 +61,62 @@ def test_cluster_domains_empty_input():
     assert labels.shape == (0,) and labels.dtype == np.int64
 
 
+def _knn_within(coords_sub: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per-region kNN edge indices (src, dst) over ``coords_sub``."""
+    n = coords_sub.shape[0]
+    d2 = ((coords_sub[:, None, :] - coords_sub[None, :, :]) ** 2).sum(-1)
+    np.fill_diagonal(d2, np.inf)
+    nn = np.argpartition(d2, k - 1, axis=1)[:, :k]
+    return np.repeat(np.arange(n), k), nn.flatten()
+
+
+def test_spatial_domain_uses_graph():
+    """Regression for #101: two coords-separated regions whose coord clouds
+    partially overlap (so k-means on [H | coords] alone is unreliable) must
+    still be cleanly resolved by ``fit_transform`` when within-region edges
+    are passed in. The graph (``edges``) is the signal that disambiguates.
+
+    On main this assertion fails — without graph-aware refinement, purity
+    sits near chance (~0.56). After threading ``edges`` through and applying
+    one majority-vote smoothing pass over the graph, purity → ~1.0.
+    """
+    from factorgraph_st.model import fit_transform
+
+    rng = np.random.default_rng(0)
+    n_per = 40
+    # Moderate coord separation: the clouds overlap enough that pure
+    # k-means on [H | coords] confuses ~40% of points.
+    coords_a = rng.normal(loc=(0.0, 0.0), scale=0.5, size=(n_per, 2)).astype(np.float32)
+    coords_b = rng.normal(loc=(2.0, 0.0), scale=0.5, size=(n_per, 2)).astype(np.float32)
+    coords = np.concatenate([coords_a, coords_b], axis=0)
+    n = 2 * n_per
+
+    X = rng.exponential(size=(n, 8)).astype(np.float32)
+    section_id = np.zeros(n, dtype=np.int64)
+
+    ra, ca = _knn_within(coords_a, k=5)
+    rb, cb = _knn_within(coords_b, k=5)
+    edges = np.stack(
+        [
+            np.concatenate([ra, rb + n_per]),
+            np.concatenate([ca, cb + n_per]),
+        ]
+    ).astype(np.int64)
+    truth = np.concatenate(
+        [np.zeros(n_per, dtype=np.int64), np.ones(n_per, dtype=np.int64)]
+    )
+
+    out = fit_transform(
+        X, coords, section_id, edges,
+        d=8, K_shared=2, K_private=2, n_domains=2, seed=0,
+    )
+    assert _purity(out.domain_id, truth) > 0.9, (
+        "Expected graph-aware clustering to resolve the two regions using "
+        "within-region edges; without edges, k-means [H | coords] alone "
+        "sits near chance on overlapping clouds."
+    )
+
+
 def test_section_id_used():
     """Regression for #50: decode_factors must consume section_id so train and
     inference share the same private-factor semantics. Two runs with the same
