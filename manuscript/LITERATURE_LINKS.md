@@ -17,6 +17,7 @@ only.
 | `janesick2023` | xenium_breast_janesick | #38 |
 | `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
 | `maynard2021` | dlpfc_maynard_2021 | #41, #133 |
+| `squidpy2022` | visium_mouse_brain_pair | #44 |
 
 ---
 
@@ -67,6 +68,13 @@ DOI [10.1038/s41593-020-00787-0](https://doi.org/10.1038/s41593-020-00787-0).
 Data: figshare [22004273](https://figshare.com/articles/dataset/22004273)
 (DOI 10.6084/m9.figshare.22004273.v2) / Bioconductor `spatialLIBD`. Tracks
 #41, #133.
+
+### `squidpy2022` — squidpy example Visium mouse brain
+Palla et al. 2022, *Squidpy: a scalable framework for spatial omics analysis*,
+*Nature Methods* 19, 171–178.
+DOI [10.1038/s41592-021-01358-2](https://doi.org/10.1038/s41592-021-01358-2).
+Data loaders: `squidpy.datasets.visium_hne_adata()` / `visium_fluo_adata()`
+(10x public mouse brain). Tracks #44.
 
 ---
 

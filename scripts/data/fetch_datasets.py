@@ -261,6 +261,23 @@ DATASETS: dict[str, Dataset] = {
             card="dlpfc_maynard_2021.yaml",
             notes="Primary multi-section domain benchmark: 12 sections, 3 donors, manual layer labels.",
         ),
+        Dataset(
+            id="visium_mouse_brain_pair",
+            title="Visium adult mouse brain coronal pair (B4)",
+            platform="Visium",
+            tier="B",
+            accession="squidpy.datasets.visium_hne_adata + visium_fluo_adata",
+            landing_url="https://squidpy.readthedocs.io/en/stable/api/squidpy.datasets.visium_hne_adata.html",
+            citation_key="squidpy2022",
+            issues=(44,),
+            raw_count_policy="raw counts preserved in .raw of each section (safe for DL training)",
+            contract=_CONTRACT_VISIUM,
+            source_kind="squidpy",
+            url_verified=True,  # programmatic squidpy loader (verified importable 05-28)
+            approx_bytes=None,
+            card="visium_mouse_brain_pair.yaml",
+            notes="Fast fully-Python two-section stack for smoke tests. Shared 2-section anchor.",
+        ),
     )
 }
 

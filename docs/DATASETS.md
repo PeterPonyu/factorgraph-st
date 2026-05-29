@@ -282,6 +282,7 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 | `xenium_breast_janesick` | Xenium breast (Janesick) | A | [#38](https://github.com/PeterPonyu/factorgraph-st/issues/38) | stub (URL UNVERIFIED) |
 | `gse293199_tnbc_xenium` | TNBC Xenium | A | [#39](https://github.com/PeterPonyu/factorgraph-st/issues/39) | stub (URL UNVERIFIED) |
 | `dlpfc_maynard_2021` | DLPFC 12-section | B | [#41](https://github.com/PeterPonyu/factorgraph-st/issues/41), [#133](https://github.com/PeterPonyu/factorgraph-st/issues/133) | stub (URL UNVERIFIED) |
+| `visium_mouse_brain_pair` | Visium mouse brain pair | B | [#44](https://github.com/PeterPonyu/factorgraph-st/issues/44) | **wired** (squidpy) |
 
 Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
 (fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),

@@ -1,0 +1,32 @@
+# Dataset provenance card — schema mirrors scripts/data/fetch_datasets.py:Dataset
+id: visium_mouse_brain_pair
+title: Visium adult mouse brain coronal pair (B4)
+tier: B
+platform: 10x Visium
+tissue: adult mouse brain (coronal)
+disease: none (healthy reference)
+sections: 2            # H&E + fluorescence; not z-registered
+labels: Leiden clusters in obs (clustering, not curated domains)
+citation_key: squidpy2022
+issues: [44]
+accession:
+  squidpy_loaders:
+    - squidpy.datasets.visium_hne_adata()
+    - squidpy.datasets.visium_fluo_adata()
+landing_url: https://squidpy.readthedocs.io/en/stable/api/squidpy.datasets.visium_hne_adata.html
+url_verified: true      # programmatic squidpy loader (importable in dl env, 05-28)
+approx_bytes: null      # squidpy-cached; not a fixed archive size
+license: 10x public / squidpy example data
+spots: ~2688 / ~2800
+genes: ~18000 / ~16000
+raw_count_policy: >-
+  Raw counts preserved in .raw of each section (safe for DL training); X is the
+  processed matrix. build_section_inputs(use_raw=True) pulls .raw.
+contract:
+  X: (n_spots, n_genes) float32 raw counts from .raw
+  coords: (n_spots, 2) float32 spot centroids from obsm['spatial']
+  section_id: int per section (0=H&E, 1=fluorescence)
+  edges: (2, n_edges) int64 hex-grid kNN via build_spatial_graph(coord_type='grid')
+notes: >-
+  Fast, fully Python-native two-section stack for smoke tests and quick domain
+  experiments. Shared 2-section anchor across repos in this research program.
