@@ -45,12 +45,23 @@ def section_overlap(Z: np.ndarray, section_id: np.ndarray) -> np.ndarray:
 
 
 def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, section_id: np.ndarray) -> dict[str, float]:
-    """Return section-spread summaries for shared and private activations."""
+    """Return section-spread summaries for shared and private activations.
+
+    A factor counts as "active" in a section when its per-section mass
+    fraction exceeds half the uniform share (``0.5 / n_sections``). This
+    criterion is scale-invariant: a factor spread uniformly over all
+    ``S`` sections has per-section mass ``~1/S`` and is correctly counted
+    as active in every section regardless of ``S``. The previous fixed
+    ``0.05`` cutoff collapsed once ``1/S`` fell below it (``S >= 20``),
+    silently reporting genuinely-shared factors as inactive (#78).
+    """
+    n_sections = int(np.unique(section_id).size)
+    threshold = (0.5 / n_sections) if n_sections else 0.0
     shared = section_overlap(Z_shared, section_id)
     private = section_overlap(Z_private, section_id)
     return {
-        "shared_mean_active_sections": float((shared > 0.05).sum(axis=1).mean()) if shared.size else 0.0,
-        "private_mean_active_sections": float((private > 0.05).sum(axis=1).mean()) if private.size else 0.0,
+        "shared_mean_active_sections": float((shared > threshold).sum(axis=1).mean()) if shared.size else 0.0,
+        "private_mean_active_sections": float((private > threshold).sum(axis=1).mean()) if private.size else 0.0,
     }
 
 
