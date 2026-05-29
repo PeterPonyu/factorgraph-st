@@ -166,6 +166,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(46.8 * GB),
             notes="High-plex (5K) imaging arm; completes the three-platform matched set.",
         ),
+        Dataset(
+            id="dawo_tls_visium",
+            title="Dawo TLS (Kidney + Lung Visium)",
+            platform="Visium v1",
+            tier="A",
+            accession="Zenodo 14620362",
+            landing_url="https://zenodo.org/records/14620362",
+            citation_key="dawo_tls",
+            issues=(35,),
+            raw_count_policy="10x_Visium/<sample>/raw_feature_bc_matrix/ + spatial/; 8 sections; raw int counts",
+            contract=_CONTRACT_VISIUM,
+            source_kind="zenodo",
+            approx_bytes=int(2.1 * GB),
+            notes="8 cancer Visium sections, two organs + TLS annotation. Small/fast first integration.",
+        ),
     )
 }
 

@@ -11,6 +11,7 @@ only.
 | citation_key | Datasets (registry ids) | Issues |
 |---|---|---|
 | `cervilla2026` | cervilla_2026_visium, cervilla_2026_xenium_cosmx, cervilla_2026_xenium_mt_5k | #32–#34 |
+| `dawo_tls` | dawo_tls_visium | #35 |
 
 ---
 
@@ -23,6 +24,11 @@ Visium/HD + Xenium/CosMx + Xenium-MT/5K). Data: Zenodo records
 [17986017](https://zenodo.org/records/17986017) (Xenium & CosMx),
 [18000256](https://zenodo.org/records/18000256) (Xenium-MT & 5K).
 Tracks issues #32–#34.
+
+### `dawo_tls` — Dawo TLS kidney + lung Visium
+Dawo et al., tertiary-lymphoid-structure carcinoma Visium (kidney + lung).
+Data: Zenodo [14620362](https://zenodo.org/records/14620362)
+(`TLS_VISIUM_USZ.zip`). Tracks #35.
 
 ---
 
