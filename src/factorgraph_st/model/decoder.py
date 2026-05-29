@@ -48,6 +48,7 @@ def decode_factors(
     Z_shared = basis[:, :K_shared].astype(np.float32, copy=False)
     Z_private = basis[:, K_shared:].astype(np.float32, copy=False)
     W = _fit_nonnegative_loadings(X, basis).astype(np.float32, copy=False)
+    Z_shared, Z_private, W = _apply_canonical_gauge(Z_shared, Z_private, W)
     if coords is None:
         coords = np.zeros((H.shape[0], 0), dtype=np.float32)
     domain_id = _cluster_domains(H, coords, n_domains, seed=seed).astype(np.int64, copy=False)
@@ -100,6 +101,28 @@ def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
         return np.zeros((X.shape[1], Z.shape[1]), dtype=np.float32)
     coef, *_ = np.linalg.lstsq(Z.astype(np.float64), X.astype(np.float64), rcond=None)
     return np.clip(coef.T, 0.0, None).astype(np.float32)
+
+
+def _apply_canonical_gauge(
+    Z_shared: np.ndarray, Z_private: np.ndarray, W: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fix the factor scale gauge of ``X ~= [Z_shared | Z_private] @ Wt``.
+
+    The factorization is invariant to ``Z[:, j] -> Z[:, j] * s_j`` together
+    with ``W[:, j] -> W[:, j] / s_j`` for any ``s_j > 0``. We pin the gauge by
+    choosing ``s_j = ||W[:, j]||_2`` so every loading column has unit L2 norm
+    and the scale is folded into the matching activation column. This is a
+    gauge-only transform: ``Z @ W.T`` is unchanged. Nonnegativity is preserved
+    because all ``s_j >= 0``; zero-norm columns are left untouched (``s_j = 1``)
+    to avoid division by zero.
+    """
+    norms = np.linalg.norm(W, axis=0)
+    scale = np.where(norms > 0.0, norms, 1.0).astype(np.float32)
+    W_n = (W / scale).astype(np.float32)
+    k_shared = Z_shared.shape[1]
+    Z_shared_n = (Z_shared * scale[:k_shared]).astype(np.float32)
+    Z_private_n = (Z_private * scale[k_shared:]).astype(np.float32)
+    return Z_shared_n, Z_private_n, W_n
 
 
 def _cluster_domains(
