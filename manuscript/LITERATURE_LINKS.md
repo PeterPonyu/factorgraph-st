@@ -13,6 +13,7 @@ only.
 | `cervilla2026` | cervilla_2026_visium, cervilla_2026_xenium_cosmx, cervilla_2026_xenium_mt_5k | #32–#34 |
 | `dawo_tls` | dawo_tls_visium | #35 |
 | `gse175540_rcc` | gse175540_rcc_visium | #36 |
+| `hest1k` | hest1k_cancer_subset | #37 |
 
 ---
 
@@ -35,6 +36,12 @@ Data: Zenodo [14620362](https://zenodo.org/records/14620362)
 Renal cell carcinoma Visium series (12 FFPE + 12 fresh-frozen). Data: GEO
 [GSE175540](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE175540).
 Tracks #36.
+
+### `hest1k` — HEST-1k curated H&E + ST
+Jaume et al. 2024, *HEST-1k: A Dataset for Spatial Transcriptomics and
+Histology Image Analysis* (NeurIPS 2024). Data: Hugging Face
+[MahmoodLab/hest](https://huggingface.co/datasets/MahmoodLab/hest) — take a
+cancer Visium subset. Tracks #37.
 
 ---
 

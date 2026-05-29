@@ -196,6 +196,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=1 * GB,
             notes="Within-disease, cross-preservation (FFPE vs FF) section set.",
         ),
+        Dataset(
+            id="hest1k_cancer_subset",
+            title="HEST-1k cancer Visium subset",
+            platform="Visium v1/v2 + legacy ST",
+            tier="A",
+            accession="HF MahmoodLab/hest",
+            landing_url="https://huggingface.co/datasets/MahmoodLab/hest",
+            citation_key="hest1k",
+            issues=(37,),
+            raw_count_policy="st/*.h5ad -> adata.X raw counts; assert integer at load",
+            contract=_CONTRACT_VISIUM,
+            source_kind="hf",
+            approx_bytes=10 * GB,
+            notes="Take a cancer Visium subset spanning many organs for section diversity.",
+        ),
     )
 }
 
