@@ -260,6 +260,40 @@ distributes per-sample `h5_raw` / `h5_filtered` Space Ranger matrices — prefer
 to a normalized-X object under the raw-counts-only policy. This augments the
 existing Tier B DLPFC row rather than adding a new cohort.
 
+## ★ Crown jewel — Wang 2025 iST FFPE matched multi-platform TMA
+
+Issues [#132](https://github.com/PeterPonyu/factorgraph-st/issues/132) (crown-jewel
+ingestion) and [#53](https://github.com/PeterPonyu/factorgraph-st/issues/53)
+(benchmark filing) track **the single highest-value emerging cohort** for
+FactorGraph-ST. Wang, Huang … Farhi 2025 (*Nature Communications* 16, 10215;
+DOI [10.1038/s41467-025-64990-y](https://doi.org/10.1038/s41467-025-64990-y)) cut
+serial sections from tissue microarrays (`tTMA1`/`tTMA2` + `nTMA`, **17 tumor +
+16 normal tissue types**) and profiled the *same physical cores* on **three
+imaging-ST platforms** — 10x **Xenium**, Vizgen **MERSCOPE**, NanoString **CosMx**
+— plus a matched scRNA-seq reference.
+
+This is the matched-cohort regime the method is built for: **platform becomes a
+clean *private* factor** while conserved tissue/tumor programs are **shared
+factors** — the strongest available test of cross-platform shared/private
+identifiability. It is newer (2025) and far broader (33 tissue types) than the
+Cervilla 6-cancer cohort, and **imaging-only** (no Visium/spot arm), so it
+*complements* rather than duplicates the Cervilla imaging arm (#33/#34).
+
+| Arm | Accession | Raw artifact (counts + spatial only) | `RAW.tar` size |
+|-----|-----------|--------------------------------------|----------------|
+| Xenium | [GSE308148](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308148) (PRJNA1329034) | `*_transcripts.parquet` → cell×gene + `*_cell_boundaries.parquet` | 91.8 GB — **EXCLUDE bulk `*_morphology.ome.tif`** per policy |
+| MERSCOPE | [GSE308147](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308147) (PRJNA1329035) | `cell_by_gene.csv` + `cell_metadata.csv` | 3.17 GB |
+| CosMx | [GSE308146](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308146) | `exprMat` cell×gene + `*_cell_metadata.csv` (ignore processed `.RDS`) | 5.97 GB |
+| scRNA ref | [GSE308145](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308145) (PRJNA1329031) | matched scRNA-seq reference | — |
+
+Registry ids: `wang_2025_ist_ffpe_xenium` / `_merscope` / `_cosmx`. Card:
+[`../data/cards/wang_2025_ist_ffpe.yaml`](../data/cards/wang_2025_ist_ffpe.yaml).
+Imaging-ST → `coord_type="generic"`; each `(platform, TMA, tissue-type)` is one
+section. **Cross-repo note:** the single-cell niche structure is also relevant to
+*niche-lens-st* — coordinate with the team lead to avoid double-filing.
+Direct GEO `RAW.tar` URLs are **⚠️ UNVERIFIED** as direct artifacts here; the
+loader stub raises `NotImplementedError` until they are resolved.
+
 ## Consolidated ingestion roadmap (registry ↔ issues)
 
 The canonical machine-readable registry is
@@ -286,6 +320,9 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 | `ji_2020_scc_st` | Ji 2020 SCC legacy ST | extended | [#43](https://github.com/PeterPonyu/factorgraph-st/issues/43) | stub (URL UNVERIFIED) |
 | `visium_mouse_brain_pair` | Visium mouse brain pair | B | [#44](https://github.com/PeterPonyu/factorgraph-st/issues/44) | **wired** (squidpy) |
 | `merfish_hypothalamus_shared` | MERFISH hypothalamus | B | [#45](https://github.com/PeterPonyu/factorgraph-st/issues/45) | **wired** (squidpy; raw via Dryad UNVERIFIED) |
+| `wang_2025_ist_ffpe_xenium` | Wang 2025 Xenium arm | A | [#53](https://github.com/PeterPonyu/factorgraph-st/issues/53), [#132](https://github.com/PeterPonyu/factorgraph-st/issues/132) | stub (URL UNVERIFIED) |
+| `wang_2025_ist_ffpe_merscope` | Wang 2025 MERSCOPE arm | A | [#53](https://github.com/PeterPonyu/factorgraph-st/issues/53), [#132](https://github.com/PeterPonyu/factorgraph-st/issues/132) | stub (URL UNVERIFIED) |
+| `wang_2025_ist_ffpe_cosmx` | Wang 2025 CosMx arm | A | [#53](https://github.com/PeterPonyu/factorgraph-st/issues/53), [#132](https://github.com/PeterPonyu/factorgraph-st/issues/132) | stub (URL UNVERIFIED) |
 
 Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
 (fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),

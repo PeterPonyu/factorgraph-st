@@ -333,6 +333,58 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(0.5 * GB),
             notes="Tumor-vs-normal + patient-private factor structure; legacy-ST breadth.",
         ),
+        # ---- Crown-jewel matched multi-platform TMA (Wang 2025) ---------- #
+        Dataset(
+            id="wang_2025_ist_ffpe_xenium",
+            title="Wang 2025 iST FFPE matched TMA — Xenium arm",
+            platform="Xenium (Multi-Tissue 377 / breast / lung)",
+            tier="A",
+            accession="GEO GSE308148 (PRJNA1329034)",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308148",
+            citation_key="wang2025_ist",
+            issues=(53, 132),
+            raw_count_policy=(
+                "per-section *_transcripts.parquet (-> cell x gene) + *_cell_boundaries.parquet; "
+                "EXCLUDE *_morphology.ome.tif per policy (counts+spatial subset only)"
+            ),
+            contract=_CONTRACT_IMAGING,
+            source_kind="geo",
+            approx_bytes=int(91.8 * GB),
+            card="wang_2025_ist_ffpe.yaml",
+            notes="Crown-jewel matched cohort (#132). 17 tumor + 16 normal types on identical TMA cores.",
+        ),
+        Dataset(
+            id="wang_2025_ist_ffpe_merscope",
+            title="Wang 2025 iST FFPE matched TMA — MERSCOPE arm",
+            platform="MERSCOPE (Vizgen)",
+            tier="A",
+            accession="GEO GSE308147 (PRJNA1329035)",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308147",
+            citation_key="wang2025_ist",
+            issues=(53, 132),
+            raw_count_policy="cell_by_gene.csv + cell_metadata.csv; raw int counts",
+            contract=_CONTRACT_IMAGING,
+            source_kind="geo",
+            approx_bytes=int(3.17 * GB),
+            card="wang_2025_ist_ffpe.yaml",
+            notes="Same TMA cores as the Xenium/CosMx arms — platform is a clean private factor.",
+        ),
+        Dataset(
+            id="wang_2025_ist_ffpe_cosmx",
+            title="Wang 2025 iST FFPE matched TMA — CosMx arm",
+            platform="CosMx (NanoString)",
+            tier="A",
+            accession="GEO GSE308146",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308146",
+            citation_key="wang2025_ist",
+            issues=(53, 132),
+            raw_count_policy="exprMat cell x gene counts + *_cell_metadata.csv; ignore processed .RDS",
+            contract=_CONTRACT_IMAGING,
+            source_kind="geo",
+            approx_bytes=int(5.97 * GB),
+            card="wang_2025_ist_ffpe.yaml",
+            notes="Third matched imaging arm. scRNA reference is GSE308145 (PRJNA1329031).",
+        ),
     )
 }
 

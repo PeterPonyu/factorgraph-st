@@ -21,6 +21,7 @@ only.
 | `ji2020` | ji_2020_scc_st | #43 |
 | `squidpy2022` | visium_mouse_brain_pair | #44 |
 | `moffitt2018` | merfish_hypothalamus_shared | #45 |
+| `wang2025_ist` | wang_2025_ist_ffpe_{xenium,merscope,cosmx} | #53, #132 |
 
 ---
 
@@ -101,6 +102,24 @@ Human Squamous Cell Carcinoma*, *Cell* 182, 497–514.
 DOI [10.1016/j.cell.2020.05.039](https://doi.org/10.1016/j.cell.2020.05.039).
 Data: GEO [GSE144240](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE144240).
 Tracks #43.
+
+## Crown-jewel matched multi-platform TMA
+
+### `wang2025_ist` — Wang 2025 iST FFPE matched multi-platform TMA
+Wang, Huang, … Farhi 2025, *Systematic benchmarking of imaging spatial
+transcriptomics platforms in FFPE tissues*, *Nature Communications* 16, 10215.
+DOI [10.1038/s41467-025-64990-y](https://doi.org/10.1038/s41467-025-64990-y) ·
+PMC [PMC12635344](https://pmc.ncbi.nlm.nih.gov/articles/PMC12635344/).
+Matched serial TMA sections (17 tumor + 16 normal types) on Xenium + MERSCOPE +
+CosMx + matched scRNA reference. Data: GEO
+[GSE308148](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308148)
+(Xenium, PRJNA1329034),
+[GSE308147](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308147)
+(MERSCOPE, PRJNA1329035),
+[GSE308146](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308146)
+(CosMx),
+[GSE308145](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308145)
+(scRNA reference, PRJNA1329031). Tracks #53, #132 (crown-jewel).
 
 ---
 
