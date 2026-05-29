@@ -272,7 +272,7 @@ def _connected_components(edges: np.ndarray, n: int) -> np.ndarray:
             x = int(parent[x])
         return x
 
-    for s, d in zip(src.tolist(), dst.tolist()):
+    for s, d in zip(src.tolist(), dst.tolist(), strict=True):
         rs, rd = find(s), find(d)
         if rs != rd:
             parent[rs] = rd
