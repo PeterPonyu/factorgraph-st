@@ -16,7 +16,8 @@ from factorgraph_st.model.decoder import _cluster_domains
 def _purity(pred: np.ndarray, truth: np.ndarray) -> float:
     """Fraction of points whose truth label matches the majority truth label
     in their predicted cluster. 1.0 = perfect; ~1/k = chance."""
-    pred = np.asarray(pred); truth = np.asarray(truth)
+    pred = np.asarray(pred)
+    truth = np.asarray(truth)
     total = 0
     for c in np.unique(pred):
         in_c = truth[pred == c]

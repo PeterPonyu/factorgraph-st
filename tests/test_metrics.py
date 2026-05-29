@@ -32,8 +32,10 @@ def _toy_graph_with_clusters():
     for c in range(3):
         idx = np.where(labels == c)[0]
         for i in range(len(idx) - 1):
-            src.append(idx[i]); dst.append(idx[i + 1])
-            src.append(idx[i + 1]); dst.append(idx[i])
+            src.append(idx[i])
+            dst.append(idx[i + 1])
+            src.append(idx[i + 1])
+            dst.append(idx[i])
     edges = np.array([src, dst], dtype=np.int64)
     return labels, edges
 
@@ -90,7 +92,7 @@ def test_label_invariance_on_real_synth_instance():
     base = label_invariant_cluster_coherence(inst.domain_id, inst.edges)
     # Apply a non-uniform relabel (codes with different magnitudes).
     unique = np.unique(inst.domain_id)
-    mapping = {int(u): int(v) for u, v in zip(unique, [101, 5, 33])}
+    mapping = {int(u): int(v) for u, v in zip(unique, [101, 5, 33], strict=False)}
     relabeled = inst.domain_id.copy()
     for k, v in mapping.items():
         relabeled[inst.domain_id == k] = v
