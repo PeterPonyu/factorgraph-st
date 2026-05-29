@@ -136,6 +136,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=26 * GB,
             notes="Crown-jewel matched-cohort Visium arm (with #33/#34). Pull matched samples first.",
         ),
+        Dataset(
+            id="cervilla_2026_xenium_cosmx",
+            title="Cervilla 2026 — Xenium & CosMx (6 cancer types)",
+            platform="Xenium + CosMx",
+            tier="A",
+            accession="Zenodo 17986017",
+            landing_url="https://zenodo.org/records/17986017",
+            citation_key="cervilla2026",
+            issues=(33,),
+            raw_count_policy="Xenium cell_feature_matrix.h5; CosMx *_exprMat_file.csv.gz; raw int counts",
+            contract=_CONTRACT_IMAGING,
+            source_kind="zenodo",
+            approx_bytes=int(23.6 * GB),
+            notes="Imaging-ST arm of the matched Cervilla tumours.",
+        ),
     )
 }
 
