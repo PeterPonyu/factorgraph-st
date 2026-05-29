@@ -8,10 +8,18 @@ import numpy as np
 
 
 def matched_factor_correlation(estimated: np.ndarray, truth: np.ndarray) -> float:
-    """Mean absolute Pearson correlation after best one-to-one factor matching."""
+    """Mean absolute Pearson correlation after best one-to-one factor matching.
+
+    Empty/degenerate inputs (no factors to match) return ``float('nan')``
+    rather than silently scoring ``1.0`` — a model that produces zero
+    factors is uninformative, not perfect. Callers/benchmark runners should
+    treat ``nan`` as "not evaluable". See #79.
+    """
+    if estimated.size == 0 or truth.size == 0:
+        return float("nan")
     corr = _abs_corr_matrix(estimated, truth)
     if corr.size == 0:
-        return 1.0
+        return float("nan")
     rows, cols = corr.shape
     if max(rows, cols) <= 8:
         best = 0.0
@@ -97,12 +105,18 @@ def label_invariant_cluster_coherence(labels: np.ndarray, edges: np.ndarray) -> 
 
 
 def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
-    """Dependency-free adjusted Rand index."""
+    """Dependency-free adjusted Rand index.
+
+    Degenerate inputs return ``float('nan')`` rather than the misleading
+    ``1.0`` ("perfect"). Specifically: ``n < 2`` (no pairs to compare) and
+    the all-one-cluster case (``denom == 0``) are signalled as
+    not-evaluable rather than as a flawless recovery. See #79.
+    """
     if labels_true.shape[0] != labels_pred.shape[0]:
         raise ValueError("label arrays must have equal length")
     n = labels_true.size
     if n < 2:
-        return 1.0
+        return float("nan")
     true_vals, true_inv = np.unique(labels_true, return_inverse=True)
     pred_vals, pred_inv = np.unique(labels_pred, return_inverse=True)
     table = np.zeros((true_vals.size, pred_vals.size), dtype=np.int64)
@@ -116,7 +130,7 @@ def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> flo
     maximum = 0.5 * (row_comb + col_comb)
     denom = maximum - expected
     if denom == 0:
-        return 1.0
+        return float("nan")
     return float((sum_comb - expected) / denom)
 
 
