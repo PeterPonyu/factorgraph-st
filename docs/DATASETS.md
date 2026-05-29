@@ -273,6 +273,7 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 
 | Registry id | Dataset | Tier | Issue(s) | Fetch status |
 |---|---|---|---|---|
+| `cervilla_2026_visium` | Cervilla Visium/HD | A | [#32](https://github.com/PeterPonyu/factorgraph-st/issues/32) | stub (URL UNVERIFIED) |
 
 Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
 (fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),

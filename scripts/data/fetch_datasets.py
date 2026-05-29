@@ -117,7 +117,27 @@ _CONTRACT_IMAGING = {
     "edges": "(2, n_edges) int64 generic kNN via build_spatial_graph(coord_type='generic')",
 }
 
-DATASETS: dict[str, Dataset] = {}
+DATASETS: dict[str, Dataset] = {
+    d.id: d
+    for d in (
+        # ---- Tier A — production cancer cohorts -------------------------- #
+        Dataset(
+            id="cervilla_2026_visium",
+            title="Cervilla 2026 — Visium / Visium HD (6 cancer types)",
+            platform="Visium v1 / CytAssist / HD",
+            tier="A",
+            accession="Zenodo 17999961",
+            landing_url="https://zenodo.org/records/17999961",
+            citation_key="cervilla2026",
+            issues=(32,),
+            raw_count_policy="filtered_feature_bc_matrix.h5 (Space Ranger); HD bins; raw int counts",
+            contract=_CONTRACT_VISIUM,
+            source_kind="zenodo",
+            approx_bytes=26 * GB,
+            notes="Crown-jewel matched-cohort Visium arm (with #33/#34). Pull matched samples first.",
+        ),
+    )
+}
 
 
 # --------------------------------------------------------------------------- #

@@ -10,8 +10,19 @@ only.
 
 | citation_key | Datasets (registry ids) | Issues |
 |---|---|---|
+| `cervilla2026` | cervilla_2026_visium, cervilla_2026_xenium_cosmx, cervilla_2026_xenium_mt_5k | #32–#34 |
 
 ---
+
+## Tier A — production cancer cohorts
+
+### `cervilla2026` — Cervilla 2026 matched multi-platform cancer cohort
+Cervilla et al. 2026, *Genome Biology* (matched 6-cancer-type cohort profiled on
+Visium/HD + Xenium/CosMx + Xenium-MT/5K). Data: Zenodo records
+[17999961](https://zenodo.org/records/17999961) (Visium/HD),
+[17986017](https://zenodo.org/records/17986017) (Xenium & CosMx),
+[18000256](https://zenodo.org/records/18000256) (Xenium-MT & 5K).
+Tracks issues #32–#34.
 
 ---
 
