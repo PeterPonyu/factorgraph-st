@@ -8,10 +8,26 @@ import numpy as np
 
 
 def matched_factor_correlation(estimated: np.ndarray, truth: np.ndarray) -> float:
-    """Mean absolute Pearson correlation after best one-to-one factor matching."""
+    """Mean absolute Pearson correlation after best one-to-one factor matching.
+
+    Empty/degenerate inputs (no factors to match) return ``float('nan')``
+    rather than silently scoring ``1.0`` — a model that produces zero
+    factors is uninformative, not perfect. Callers/benchmark runners should
+    treat ``nan`` as "not evaluable". See #79.
+    """
+    if estimated.size == 0 or truth.size == 0:
+        return float("nan")
     corr = _abs_corr_matrix(estimated, truth)
     if corr.size == 0:
-        return 1.0
+        return float("nan")
+    # Orient so rows <= cols. The matching value is symmetric, but both the
+    # brute-force and greedy searches below assign every row to a distinct
+    # column and only ever consider the first ``cols`` rows; with more
+    # estimated factors than truth factors (rows > cols) that silently ignored
+    # the surplus estimated factors and undercounted recovery (#46). Searching
+    # over the larger axis fixes both paths.
+    if corr.shape[0] > corr.shape[1]:
+        corr = corr.T
     rows, cols = corr.shape
     if max(rows, cols) <= 8:
         best = 0.0
@@ -42,6 +58,26 @@ def section_overlap(Z: np.ndarray, section_id: np.ndarray) -> np.ndarray:
     for j, section in enumerate(sections):
         out[:, j] = Z[section_id == section].sum(axis=0) / np.maximum(mass, 1e-12)
     return out
+
+
+def factor_redundancy(Z: np.ndarray) -> float:
+    """Mean absolute off-diagonal correlation among estimated factors.
+
+    Quantifies *within-estimate* redundancy of the recovered factors (the
+    columns of ``Z = [Z_shared | Z_private]``). ``0.0`` means the factors are
+    mutually uncorrelated (well disentangled); values approaching ``1.0`` mean
+    near-duplicate factors (the same program reported multiple times).
+    Constant (zero-variance) factors contribute zero correlation, and fewer
+    than two factors returns ``0.0`` (no redundancy is possible).
+    """
+    if Z.ndim != 2:
+        raise ValueError("Z must be 2D")
+    k = Z.shape[1]
+    if k < 2:
+        return 0.0
+    corr = _abs_corr_matrix(Z, Z)
+    off_diagonal = float(corr.sum() - np.trace(corr))
+    return off_diagonal / (k * (k - 1))
 
 
 def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, section_id: np.ndarray) -> dict[str, float]:
@@ -111,12 +147,18 @@ def label_invariant_cluster_coherence(labels: np.ndarray, edges: np.ndarray) -> 
 
 
 def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
-    """Dependency-free adjusted Rand index."""
+    """Dependency-free adjusted Rand index.
+
+    Degenerate inputs return ``float('nan')`` rather than the misleading
+    ``1.0`` ("perfect"). Specifically: ``n < 2`` (no pairs to compare) and
+    the all-one-cluster case (``denom == 0``) are signalled as
+    not-evaluable rather than as a flawless recovery. See #79.
+    """
     if labels_true.shape[0] != labels_pred.shape[0]:
         raise ValueError("label arrays must have equal length")
     n = labels_true.size
     if n < 2:
-        return 1.0
+        return float("nan")
     true_vals, true_inv = np.unique(labels_true, return_inverse=True)
     pred_vals, pred_inv = np.unique(labels_pred, return_inverse=True)
     table = np.zeros((true_vals.size, pred_vals.size), dtype=np.int64)
@@ -130,7 +172,7 @@ def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> flo
     maximum = 0.5 * (row_comb + col_comb)
     denom = maximum - expected
     if denom == 0:
-        return 1.0
+        return float("nan")
     return float((sum_comb - expected) / denom)
 
 
