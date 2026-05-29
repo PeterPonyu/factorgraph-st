@@ -2,6 +2,7 @@
 
 from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
+    factor_redundancy,
     label_invariant_cluster_coherence,
     matched_factor_correlation,
     morans_i,
@@ -11,6 +12,7 @@ from factorgraph_st.eval.metrics import (
 
 __all__ = [
     "adjusted_rand_index",
+    "factor_redundancy",
     "label_invariant_cluster_coherence",
     "matched_factor_correlation",
     "morans_i",
