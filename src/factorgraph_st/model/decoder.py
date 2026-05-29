@@ -100,6 +100,15 @@ def fit_transform(
 
 
 def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
+    """Convert ``H`` into a nonnegative per-column-normalized factor basis.
+
+    Constant or near-constant columns (``std < 1e-12``) are explicitly zeroed
+    rather than divided by an eps floor. The previous ``raw / max(scale, 1e-6)
+    + 1e-6`` formulation amplified microscopic input variation by up to ~1e6×
+    on near-constant columns and left a 1e-6 bias term on truly constant
+    columns — silently corrupting downstream loadings and clustering with a
+    fake signal. See #85.
+    """
     if H.shape[0] == 0:
         return np.empty((0, n_components), dtype=np.float32)
     if H.shape[1] >= n_components:
@@ -108,7 +117,13 @@ def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
         raw = np.pad(H, ((0, 0), (0, n_components - H.shape[1])))
     raw = raw - raw.min(axis=0, keepdims=True)
     scale = raw.std(axis=0, keepdims=True)
-    return (raw / np.maximum(scale, 1e-6) + 1e-6).astype(np.float32)
+    low_var = scale < 1e-12
+    safe_scale = np.where(low_var, 1.0, scale)
+    basis = raw / safe_scale
+    # Zero out columns that carried no information so the eps floor cannot
+    # propagate as a fake bias term.
+    basis = np.where(np.broadcast_to(low_var, basis.shape), 0.0, basis)
+    return basis.astype(np.float32)
 
 
 def _section_gate_private(Z_private: np.ndarray, section_id: np.ndarray) -> np.ndarray:
