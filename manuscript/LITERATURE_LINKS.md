@@ -18,6 +18,7 @@ only.
 | `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
 | `maynard2021` | dlpfc_maynard_2021 | #41, #133 |
 | `squidpy2022` | visium_mouse_brain_pair | #44 |
+| `moffitt2018` | merfish_hypothalamus_shared | #45 |
 
 ---
 
@@ -75,6 +76,13 @@ Palla et al. 2022, *Squidpy: a scalable framework for spatial omics analysis*,
 DOI [10.1038/s41592-021-01358-2](https://doi.org/10.1038/s41592-021-01358-2).
 Data loaders: `squidpy.datasets.visium_hne_adata()` / `visium_fluo_adata()`
 (10x public mouse brain). Tracks #44.
+
+### `moffitt2018` — MERFISH mouse hypothalamus
+Moffitt et al. 2018, *Molecular, spatial, and functional single-cell profiling
+of the hypothalamic preoptic region*, *Science* 362, eaau5324.
+DOI [10.1126/science.aau5324](https://doi.org/10.1126/science.aau5324).
+Data: `squidpy.datasets.merfish()`; raw counts on Dryad
+`doi:10.5061/dryad.8t8s248` ⚠️ UNVERIFIED direct URL. Tracks #45.
 
 ---
 

@@ -278,6 +278,26 @@ DATASETS: dict[str, Dataset] = {
             card="visium_mouse_brain_pair.yaml",
             notes="Fast fully-Python two-section stack for smoke tests. Shared 2-section anchor.",
         ),
+        Dataset(
+            id="merfish_hypothalamus_shared",
+            title="MERFISH mouse hypothalamus (Moffitt 2018; 8 AP sections)",
+            platform="MERFISH (imaging)",
+            tier="B",
+            accession="squidpy.datasets.merfish (raw counts: Dryad doi:10.5061/dryad.8t8s248)",
+            landing_url="https://squidpy.readthedocs.io/en/stable/api/squidpy.datasets.merfish.html",
+            citation_key="moffitt2018",
+            issues=(45,),
+            raw_count_policy=(
+                "squidpy copy is normalized; for DL training pull raw counts from "
+                "Dryad doi:10.5061/dryad.8t8s248 (CC0, ~1.03 GB)"
+            ),
+            contract=_CONTRACT_IMAGING,
+            source_kind="squidpy",
+            url_verified=True,  # programmatic squidpy loader (verified importable 05-28)
+            approx_bytes=None,
+            card="merfish_hypothalamus_shared.yaml",
+            notes="8 AP sections (obs['Bregma']); heterogeneous non-Visium stress test.",
+        ),
     )
 }
 
