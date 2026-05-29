@@ -24,6 +24,7 @@ from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
     label_invariant_cluster_coherence,
     matched_factor_correlation,
+    shared_private_separation,
 )
 
 
@@ -135,6 +136,35 @@ def test_label_invariance_on_real_synth_instance():
         f"label-invariance must hold on real synth graph; "
         f"got base={base} vs permuted={permuted}"
     )
+
+
+def test_separation_threshold_scales():
+    """#78: a factor active uniformly in EVERY section must report ~S active
+    sections regardless of the section count S. The old fixed 0.05 threshold
+    collapsed once per-section mass (~1/S) fell below 0.05 (S >= 20)."""
+    K = 3
+    for S in (4, 16, 20, 25):
+        n_per = 5
+        section_id = np.repeat(np.arange(S, dtype=np.int64), n_per)
+        # Uniform activation -> per-section mass fraction == 1/S for every factor.
+        Z_shared = np.ones((S * n_per, K), dtype=np.float32)
+        Z_private = np.zeros((S * n_per, 1), dtype=np.float32)
+        r = shared_private_separation(Z_shared, Z_private, section_id)
+        assert r["shared_mean_active_sections"] == float(S), (
+            f"S={S}: expected {S} active sections, got "
+            f"{r['shared_mean_active_sections']}"
+        )
+
+
+def test_separation_detects_private_factor():
+    """A factor concentrated in a single section counts as active in exactly 1."""
+    S, n_per = 25, 5
+    section_id = np.repeat(np.arange(S, dtype=np.int64), n_per)
+    Z_private = np.zeros((S * n_per, 1), dtype=np.float32)
+    Z_private[section_id == 7, 0] = 1.0  # all mass in one section
+    Z_shared = np.zeros((S * n_per, 1), dtype=np.float32)
+    r = shared_private_separation(Z_shared, Z_private, section_id)
+    assert r["private_mean_active_sections"] == 1.0
 
 
 def test_recovery_overcomplete_factors():
