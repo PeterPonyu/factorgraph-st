@@ -211,6 +211,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=10 * GB,
             notes="Take a cancer Visium subset spanning many organs for section diversity.",
         ),
+        Dataset(
+            id="xenium_breast_janesick",
+            title="Xenium Breast Cancer (Janesick)",
+            platform="Xenium",
+            tier="A",
+            accession="10x Xenium_V1_human_Breast demo (GEO GSE243280 mirror)",
+            landing_url="https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast",
+            citation_key="janesick2023",
+            issues=(38,),
+            raw_count_policy="*_cell_feature_matrix.h5 (Rep1/Rep2); raw int counts",
+            contract=_CONTRACT_IMAGING,
+            source_kind="geo",
+            approx_bytes=int(1.5 * GB),
+            notes="Canonical single-cell-resolution breast Xenium (313-gene panel).",
+        ),
     )
 }
 

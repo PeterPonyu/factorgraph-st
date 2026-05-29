@@ -14,6 +14,7 @@ only.
 | `dawo_tls` | dawo_tls_visium | #35 |
 | `gse175540_rcc` | gse175540_rcc_visium | #36 |
 | `hest1k` | hest1k_cancer_subset | #37 |
+| `janesick2023` | xenium_breast_janesick | #38 |
 
 ---
 
@@ -42,6 +43,13 @@ Jaume et al. 2024, *HEST-1k: A Dataset for Spatial Transcriptomics and
 Histology Image Analysis* (NeurIPS 2024). Data: Hugging Face
 [MahmoodLab/hest](https://huggingface.co/datasets/MahmoodLab/hest) — take a
 cancer Visium subset. Tracks #37.
+
+### `janesick2023` — Xenium human breast cancer (Janesick)
+Janesick et al. 2023, *High resolution mapping of the tumor microenvironment
+using integrated single-cell, spatial and in situ analysis*, *Nature
+Communications* 14, 8353. Data: 10x
+[Xenium human breast demo](https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast)
+(GEO GSE243280 mirror). Tracks #38.
 
 ---
 

@@ -279,6 +279,7 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 | `dawo_tls_visium` | Dawo TLS kidney+lung | A | [#35](https://github.com/PeterPonyu/factorgraph-st/issues/35) | stub (URL UNVERIFIED) |
 | `gse175540_rcc_visium` | RCC Visium (24 sec) | A | [#36](https://github.com/PeterPonyu/factorgraph-st/issues/36) | stub (URL UNVERIFIED) |
 | `hest1k_cancer_subset` | HEST-1k cancer subset | A | [#37](https://github.com/PeterPonyu/factorgraph-st/issues/37) | stub (URL UNVERIFIED) |
+| `xenium_breast_janesick` | Xenium breast (Janesick) | A | [#38](https://github.com/PeterPonyu/factorgraph-st/issues/38) | stub (URL UNVERIFIED) |
 
 Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
 (fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),
