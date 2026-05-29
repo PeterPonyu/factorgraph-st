@@ -113,10 +113,17 @@ def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
     """
     if H.shape[0] == 0:
         return np.empty((0, n_components), dtype=np.float32)
-    if H.shape[1] >= n_components:
-        raw = H[:, :n_components]
-    else:
-        raw = np.pad(H, ((0, 0), (0, n_components - H.shape[1])))
+    if H.shape[1] < n_components:
+        # Closes #69. Previously H was zero-padded; the std=0 columns then
+        # collapsed to the constant 1e-6, silently producing dead factors that
+        # still pass validate_outputs (nonneg + finite). Refuse the misuse
+        # instead so callers learn at the boundary.
+        raise ValueError(
+            f"H.shape[1]={H.shape[1]} < n_components={n_components}; "
+            "require d >= K_shared + K_private so every factor is backed by a "
+            "real embedding column (no zero-padded, constant Z_* columns)."
+        )
+    raw = H[:, :n_components]
     raw = raw - raw.min(axis=0, keepdims=True)
     scale = raw.std(axis=0, keepdims=True)
     low_var = scale < 1e-12
