@@ -104,6 +104,47 @@ def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, secti
     }
 
 
+def reconstruction_error(X: np.ndarray, Z: np.ndarray, W: np.ndarray) -> float:
+    """Relative Frobenius reconstruction error ``||X - Z @ W.T||_F / ||X||_F``.
+
+    The standard fidelity measure for a factor model ``X ~= Z @ W.T``. Unlike
+    recovery metrics it needs no ground-truth factors, so it is the natural
+    score on real data. ``0.0`` = perfect reconstruction. When ``X`` is all
+    zeros the denominator is zero and the absolute residual norm is returned.
+    """
+    Xf = np.asarray(X, dtype=np.float64)
+    residual = Xf - np.asarray(Z, dtype=np.float64) @ np.asarray(W, dtype=np.float64).T
+    denom = float(np.linalg.norm(Xf))
+    if denom == 0.0:
+        return float(np.linalg.norm(residual))
+    return float(np.linalg.norm(residual) / denom)
+
+
+def held_out_reconstruction_error(
+    X: np.ndarray, Z: np.ndarray, *, holdout: float = 0.2, seed: int = 0
+) -> float:
+    """Refit loadings on a spot subset and score relative error on the rest.
+
+    Detects over/under-fitting and informs ``K`` selection: nonnegative loadings
+    ``W`` are refit by least squares on the training spots, then scored as the
+    relative Frobenius error on the held-out spots. Returns ``0.0`` when either
+    split would be empty (fewer than two spots, or a degenerate ``holdout``).
+    """
+    Xf = np.asarray(X, dtype=np.float64)
+    Zf = np.asarray(Z, dtype=np.float64)
+    n = Xf.shape[0]
+    if n < 2:
+        return 0.0
+    n_test = max(1, int(round(holdout * n)))
+    if n_test >= n:
+        return 0.0
+    perm = np.random.default_rng(seed).permutation(n)
+    test_idx, train_idx = perm[:n_test], perm[n_test:]
+    coef, *_ = np.linalg.lstsq(Zf[train_idx], Xf[train_idx], rcond=None)
+    W = np.clip(coef.T, 0.0, None)
+    return reconstruction_error(Xf[test_idx], Zf[test_idx], W)
+
+
 def morans_i(values: np.ndarray, edges: np.ndarray) -> float:
     """Compute Moran's I on graph edges for a numeric score.
 
