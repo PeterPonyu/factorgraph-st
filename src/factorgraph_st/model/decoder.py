@@ -159,13 +159,77 @@ def _section_gate_private(Z_private: np.ndarray, section_id: np.ndarray) -> np.n
 
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    """Solve column-wise nonnegative least-squares for ``W`` given ``Z`` and ``X``.
+
+    For each gene column ``j``, returns the ``W[j, :]`` that minimizes
+    ``||X[:, j] - Z @ W[j, :].T||_2`` subject to ``W[j, :] >= 0`` via the
+    numpy-only Lawson-Hanson active-set NNLS in :func:`_nnls`. This replaces
+    the prior ``clip(lstsq, 0)`` estimator, which is *not* NNLS — clipping an
+    unconstrained solution yields a biased, non-optimal ``W`` whenever the
+    true optimum has active nonneg constraints. See #83.
+
+    Cost: NNLS is solved independently per gene column, so the loop is
+    ``O(n_features)`` solves. Each solve is a small active-set problem over
+    ``K = Z.shape[1]`` factors (the active set adds at most ``K`` columns and
+    each inner least-squares is ``O(n_spots * K^2)``); since ``K`` is tiny
+    (a handful of factors) the per-column work is dominated by the ``Z``
+    normal-equation products and the loop scales linearly in the gene count.
+    A numpy-only solver keeps the runtime dependency surface at numpy alone.
+    """
     if Z.shape[0] == 0:
         # Empty input: return deterministic, finite, nonnegative zeros.
         # np.empty would leak uninitialized memory (often non-finite or
         # negative), violating the nonnegative-loadings contract.
         return np.zeros((X.shape[1], Z.shape[1]), dtype=np.float32)
-    coef, *_ = np.linalg.lstsq(Z.astype(np.float64), X.astype(np.float64), rcond=None)
-    return np.clip(coef.T, 0.0, None).astype(np.float32)
+    Z64 = Z.astype(np.float64, copy=False)
+    X64 = X.astype(np.float64, copy=False)
+    n_features = X64.shape[1]
+    W = np.empty((n_features, Z64.shape[1]), dtype=np.float64)
+    for j in range(n_features):
+        W[j] = _nnls(Z64, X64[:, j])
+    return W.astype(np.float32)
+
+
+def _nnls(A: np.ndarray, b: np.ndarray, *, tol: float = 1e-10, max_iter: int | None = None) -> np.ndarray:
+    """Numpy-only nonnegative least squares: minimize ``||A x - b||_2`` s.t. ``x >= 0``.
+
+    Classic Lawson-Hanson active-set algorithm (matches
+    :func:`scipy.optimize.nnls` to floating-point tolerance). Implemented in
+    numpy so the runtime package stays numpy-only; ``A`` is the ``(n_spots, K)``
+    factor matrix and ``b`` is a single ``(n_spots,)`` gene column.
+    """
+    A = np.ascontiguousarray(A, dtype=np.float64)
+    b = np.ascontiguousarray(b, dtype=np.float64)
+    n = A.shape[1]
+    iter_cap = 3 * n if max_iter is None else max_iter
+    AtA = A.T @ A
+    Atb = A.T @ b
+    x = np.zeros(n, dtype=np.float64)
+    passive = np.zeros(n, dtype=bool)
+    w = Atb - AtA @ x
+    outer = 0
+    while not passive.all() and np.max(np.where(passive, -np.inf, w)) > tol:
+        # Move the most-violating active coordinate into the passive set.
+        j = int(np.argmax(np.where(passive, -np.inf, w)))
+        passive[j] = True
+        while True:
+            P = np.where(passive)[0]
+            s = np.zeros(n, dtype=np.float64)
+            s[P] = np.linalg.lstsq(A[:, P], b, rcond=None)[0]
+            if s[P].min() > tol:
+                x = s
+                break
+            # Backtrack toward the unconstrained passive solution until a
+            # passive coordinate hits zero, then drop it from the passive set.
+            mask = passive & (s <= tol)
+            alpha = (x[mask] / (x[mask] - s[mask])).min()
+            x = x + alpha * (s - x)
+            passive &= x > tol
+        w = Atb - AtA @ x
+        outer += 1
+        if outer > iter_cap:
+            break
+    return x
 
 
 def _apply_canonical_gauge(
