@@ -48,15 +48,18 @@ def shared_private_separation(Z_shared: np.ndarray, Z_private: np.ndarray, secti
     """Return section-spread summaries for shared and private activations.
 
     A factor counts as "active" in a section when its per-section mass
-    fraction exceeds half the uniform share (``0.5 / n_sections``). This
-    criterion is scale-invariant: a factor spread uniformly over all
-    ``S`` sections has per-section mass ``~1/S`` and is correctly counted
-    as active in every section regardless of ``S``. The previous fixed
-    ``0.05`` cutoff collapsed once ``1/S`` fell below it (``S >= 20``),
-    silently reporting genuinely-shared factors as inactive (#78).
+    fraction exceeds ``min(0.05, 0.5 / n_sections)`` — the legacy ``0.05``
+    floor, but never stricter than half the uniform share. A factor spread
+    uniformly over all ``S`` sections has per-section mass ``~1/S``; capping
+    the cutoff at ``0.5 / S`` keeps such factors counted as active in every
+    section even for large ``S``, which the fixed ``0.05`` cutoff missed once
+    ``1/S`` fell below it (``S >= 20``) — silently reporting genuinely-shared
+    factors as inactive (#78). For small ``S`` the ``0.05`` floor is retained,
+    so shared factors with mildly uneven mass are not spuriously dropped (a
+    bare ``0.5 / S`` cutoff is stricter than ``0.05`` for ``S < 10``).
     """
     n_sections = int(np.unique(section_id).size)
-    threshold = (0.5 / n_sections) if n_sections else 0.0
+    threshold = min(0.05, 0.5 / n_sections) if n_sections else 0.0
     shared = section_overlap(Z_shared, section_id)
     private = section_overlap(Z_private, section_id)
     return {
