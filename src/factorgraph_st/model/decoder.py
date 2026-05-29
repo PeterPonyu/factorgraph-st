@@ -116,15 +116,19 @@ def _cluster_domains(
     n_init: int = 4,
     max_iter: int = 100,
 ) -> np.ndarray:
-    """Assign domain ids by deterministic k-means on z-normalized ``[H | coords]``,
-    then refine with graph-aware label smoothing over ``edges``.
+    """Assign domain ids over the z-normalized joint feature ``[H | coords]``.
 
-    Closes #101 / extends the #75 fix: k-means on ``[H | coords]`` alone still
-    ignores the spatial graph, so coord-overlapping regions are mixed near
-    chance even when the graph cleanly separates them. After convergence we
-    run a few rounds of majority-vote label propagation through ``edges`` so
-    the final assignment respects graph connectivity. ``edges=None`` (or an
-    empty edge list) reverts to the pure k-means behavior.
+    When ``edges`` is provided, domains are assigned by graph-aware clustering:
+    each connected component of ``edges`` is collapsed to its centroid and the
+    centroids are clustered (see :func:`_cluster_components`), guaranteeing that
+    every connected component receives a single label. When ``edges`` is None or
+    empty, this falls back to a deterministic per-spot k-means on the same
+    z-normalized feature.
+
+    Closes #101 / extends the #75 fix: per-spot k-means on ``[H | coords]`` alone
+    ignores the spatial graph, so coord-overlapping regions are mixed near chance
+    even when the graph cleanly separates them. The component-centroid path keeps
+    graph-connected spots in the same domain.
     """
     n = H.shape[0]
     if n == 0:
@@ -140,6 +144,11 @@ def _cluster_domains(
         a = np.asarray(arr, dtype=np.float64)
         parts.append((a - a.mean(0, keepdims=True)) / np.maximum(a.std(0, keepdims=True), 1e-6))
     X = np.concatenate(parts, axis=1) if parts else np.zeros((n, 1), dtype=np.float64)
+
+    if edges is not None and edges.size > 0:
+        # Graph-aware path: cluster connected-component centroids. (Replaces the
+        # per-spot k-means below, which is only the no-graph fallback.)
+        return _cluster_components(X, edges, k, seed, n_init, max_iter)
 
     rng = np.random.default_rng(seed)
     best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
@@ -158,9 +167,6 @@ def _cluster_domains(
         inertia = float(((X - centers[labels]) ** 2).sum())
         if inertia < best_inertia:
             best_inertia, best_labels = inertia, labels
-
-    if edges is not None and edges.size > 0:
-        best_labels = _cluster_components(X, edges, k, seed, n_init, max_iter)
     return best_labels
 
 
