@@ -19,10 +19,18 @@ def validate_inputs(
     coords: np.ndarray,
     section_id: np.ndarray,
     edges: np.ndarray,
+    *,
+    strict: bool = False,
 ) -> None:
     """Validate MVP inputs.
 
     Raises ``SchemaError`` on any violation. Returns ``None`` on success.
+
+    Negative ``section_id`` values are always rejected. ``strict=True``
+    additionally enforces the per-section graph contract — contiguous
+    ``section_id`` labels (``0..n_sections-1``) and ``edges`` that contain
+    no self-loops, no cross-section pairs, and no duplicates — gated behind
+    the flag so the O(n_edges) checks do not slow the fast path.
     """
     if X.ndim != 2:
         raise SchemaError(f"X must be 2D; got ndim={X.ndim}")
@@ -45,6 +53,14 @@ def validate_inputs(
         raise SchemaError(f"section_id must be (n_spots,); got shape={section_id.shape}")
     if section_id.dtype.kind not in ("i", "u"):
         raise SchemaError(f"section_id must be integer dtype; got {section_id.dtype}")
+    if section_id.size and section_id.min() < 0:
+        raise SchemaError("section_id must be non-negative")
+    if strict and section_id.size:
+        unique_sections = np.unique(section_id)
+        if not np.array_equal(unique_sections, np.arange(unique_sections.size)):
+            raise SchemaError(
+                "section_id must be contiguous 0..n_sections-1 in strict mode"
+            )
 
     if edges.ndim != 2 or edges.shape[0] != 2:
         raise SchemaError(f"edges must be (2, n_edges); got shape={edges.shape}")
@@ -52,6 +68,15 @@ def validate_inputs(
         raise SchemaError(f"edges must be int64; got {edges.dtype}")
     if edges.size and (edges.min() < 0 or edges.max() >= n_spots):
         raise SchemaError("edges contain indices outside [0, n_spots)")
+    if strict and edges.size:
+        src, dst = edges
+        if np.any(src == dst):
+            raise SchemaError("edges must not contain self-loops in strict mode")
+        if np.any(section_id[src] != section_id[dst]):
+            raise SchemaError("edges must stay within a single section in strict mode")
+        pairs = np.stack([src, dst], axis=1)
+        if np.unique(pairs, axis=0).shape[0] != pairs.shape[0]:
+            raise SchemaError("edges must not contain duplicate pairs in strict mode")
 
 
 def validate_outputs(
