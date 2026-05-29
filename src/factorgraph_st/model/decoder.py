@@ -95,7 +95,9 @@ def fit_transform(
         section_id=section_id,
         seed=seed,
     )
-    validate_outputs(outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1])
+    validate_outputs(
+        outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1]
+    )
     return outputs
 
 
