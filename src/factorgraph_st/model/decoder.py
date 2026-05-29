@@ -26,6 +26,7 @@ def decode_factors(
     K_private: int = 2,
     n_domains: int = 5,
     coords: np.ndarray | None = None,
+    section_id: np.ndarray | None = None,
     seed: int = 0,
 ) -> FactorGraphOutputs:
     """Decode deterministic nonnegative factors from ``H`` and ``X``.
@@ -33,6 +34,12 @@ def decode_factors(
     This is a lightweight baseline implementation that satisfies the MVP schema:
     activations are rectified embeddings and loadings are least-squares estimates
     clipped to nonnegative values.
+
+    When ``section_id`` is provided, each private factor column ``k`` is
+    section-gated (zeroed outside section ``unique(section_id)[k % n_sections]``)
+    so the decoder's ``Z_private`` mirrors the generator's section-private
+    semantics — train and inference share the same conditioning instead of
+    silently dropping ``section_id`` on the floor.
 
     Spatial domains are assigned by a deterministic k-means pass on the
     z-normalized joint feature ``[H | coords]``. Passing ``coords=None``
@@ -47,7 +54,10 @@ def decode_factors(
     basis = _positive_basis(H, K_total)
     Z_shared = basis[:, :K_shared].astype(np.float32, copy=False)
     Z_private = basis[:, K_shared:].astype(np.float32, copy=False)
-    W = _fit_nonnegative_loadings(X, basis).astype(np.float32, copy=False)
+    if section_id is not None and Z_private.shape[1] > 0:
+        Z_private = _section_gate_private(Z_private, section_id)
+    Z_full = np.concatenate([Z_shared, Z_private], axis=1)
+    W = _fit_nonnegative_loadings(X, Z_full).astype(np.float32, copy=False)
     if coords is None:
         coords = np.zeros((H.shape[0], 0), dtype=np.float32)
     domain_id = _cluster_domains(H, coords, n_domains, seed=seed).astype(np.int64, copy=False)
@@ -74,6 +84,7 @@ def fit_transform(
         K_private=K_private,
         n_domains=n_domains,
         coords=coords,
+        section_id=section_id,
         seed=seed,
     )
     validate_outputs(outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1])
@@ -90,6 +101,24 @@ def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
     raw = raw - raw.min(axis=0, keepdims=True)
     scale = raw.std(axis=0, keepdims=True)
     return (raw / np.maximum(scale, 1e-6) + 1e-6).astype(np.float32)
+
+
+def _section_gate_private(Z_private: np.ndarray, section_id: np.ndarray) -> np.ndarray:
+    """Zero out each private factor outside its assigned section.
+
+    Mirrors the synthetic generator: private column ``k`` is active only on
+    section ``unique(section_id)[k % n_sections]``. Closes #50 — without this,
+    ``decode_factors`` ignores ``section_id`` and ``Z_private`` is identical
+    across permuted section assignments.
+    """
+    sections = np.unique(section_id)
+    if sections.size == 0:
+        return Z_private
+    gated = Z_private.copy()
+    for k in range(gated.shape[1]):
+        s = sections[k % sections.size]
+        gated[section_id != s, k] = 0.0
+    return gated
 
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:

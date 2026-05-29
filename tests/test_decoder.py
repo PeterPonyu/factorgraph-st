@@ -58,3 +58,30 @@ def test_cluster_domains_empty_input():
     coords = np.zeros((0, 2), dtype=np.float32)
     labels = _cluster_domains(H, coords, n_domains=3)
     assert labels.shape == (0,) and labels.dtype == np.int64
+
+
+def test_section_id_used():
+    """Regression for #50: decode_factors must consume section_id so train and
+    inference share the same private-factor semantics. Two runs with the same
+    ``H``/``X`` but permuted ``section_id`` must NOT produce identical outputs;
+    on main, ``section_id`` is dropped on the floor and the outputs are equal.
+    """
+    from factorgraph_st.model.decoder import decode_factors
+
+    rng = np.random.default_rng(0)
+    n_per = 12
+    n_sections = 3
+    n = n_per * n_sections
+    X = rng.exponential(size=(n, 8)).astype(np.float32)
+    H = rng.normal(size=(n, 8)).astype(np.float32)
+    sid_a = np.repeat(np.arange(n_sections, dtype=np.int64), n_per)
+    # Different section assignment over the same K=3 sections.
+    sid_b = np.tile(np.arange(n_sections, dtype=np.int64), n_per)
+
+    out_a = decode_factors(X, H, K_shared=2, K_private=2, section_id=sid_a)
+    out_b = decode_factors(X, H, K_shared=2, K_private=2, section_id=sid_b)
+
+    assert not np.array_equal(out_a.Z_private, out_b.Z_private), (
+        "decode_factors ignored section_id; Z_private identical across section "
+        "assignments — private factors are not actually section-private."
+    )
