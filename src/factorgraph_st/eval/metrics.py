@@ -12,6 +12,14 @@ def matched_factor_correlation(estimated: np.ndarray, truth: np.ndarray) -> floa
     corr = _abs_corr_matrix(estimated, truth)
     if corr.size == 0:
         return 1.0
+    # Orient so rows <= cols. The matching value is symmetric, but both the
+    # brute-force and greedy searches below assign every row to a distinct
+    # column and only ever consider the first ``cols`` rows; with more
+    # estimated factors than truth factors (rows > cols) that silently ignored
+    # the surplus estimated factors and undercounted recovery (#46). Searching
+    # over the larger axis fixes both paths.
+    if corr.shape[0] > corr.shape[1]:
+        corr = corr.T
     rows, cols = corr.shape
     if max(rows, cols) <= 8:
         best = 0.0
