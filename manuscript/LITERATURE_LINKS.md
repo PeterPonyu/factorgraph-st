@@ -17,6 +17,7 @@ only.
 | `janesick2023` | xenium_breast_janesick | #38 |
 | `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
 | `maynard2021` | dlpfc_maynard_2021 | #41, #133 |
+| `wu2021` | wu_2021_breast_visium | #42 |
 | `squidpy2022` | visium_mouse_brain_pair | #44 |
 | `moffitt2018` | merfish_hypothalamus_shared | #45 |
 
@@ -83,6 +84,15 @@ of the hypothalamic preoptic region*, *Science* 362, eaau5324.
 DOI [10.1126/science.aau5324](https://doi.org/10.1126/science.aau5324).
 Data: `squidpy.datasets.merfish()`; raw counts on Dryad
 `doi:10.5061/dryad.8t8s248` ⚠️ UNVERIFIED direct URL. Tracks #45.
+
+## Extended validation cohorts
+
+### `wu2021` — Wu 2021 breast cancer Visium
+Wu et al. 2021, *A single-cell and spatially resolved atlas of human breast
+cancers*, *Nature Genetics* 53, 1334–1347.
+DOI [10.1038/s41588-021-00911-1](https://doi.org/10.1038/s41588-021-00911-1).
+Data: Zenodo [4739739](https://zenodo.org/records/4739739)
+(`raw_count_matrices.tar.gz` + `spatial.tar.gz`). Tracks #42.
 
 ---
 

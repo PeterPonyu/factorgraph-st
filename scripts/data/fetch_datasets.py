@@ -298,6 +298,22 @@ DATASETS: dict[str, Dataset] = {
             card="merfish_hypothalamus_shared.yaml",
             notes="8 AP sections (obs['Bregma']); heterogeneous non-Visium stress test.",
         ),
+        # ---- Extended validation cohorts --------------------------------- #
+        Dataset(
+            id="wu_2021_breast_visium",
+            title="Wu 2021 breast cancer Visium (multi-subtype)",
+            platform="Visium v1",
+            tier="extended",
+            accession="Zenodo 4739739",
+            landing_url="https://zenodo.org/records/4739739",
+            citation_key="wu2021",
+            issues=(42,),
+            raw_count_policy="raw_count_matrices.tar.gz (252.9 MB) + spatial.tar.gz; raw int counts",
+            contract=_CONTRACT_VISIUM,
+            source_kind="zenodo",
+            approx_bytes=int(0.25 * GB),
+            notes="Independent multi-section breast Visium for cross-study conserved-factor tests.",
+        ),
     )
 }
 
