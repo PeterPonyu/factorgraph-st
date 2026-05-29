@@ -93,6 +93,15 @@ def test_domain_id_negative_fails():
         validate_outputs(**kw)
 
 
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_H_finiteness_checked(bad):
+    kw = _ok()
+    kw["H"] = kw["H"].copy()
+    kw["H"][0, 0] = bad
+    with pytest.raises(SchemaError, match="H must be finite"):
+        validate_outputs(**kw)
+
+
 @pytest.mark.parametrize("name", ["W", "Z_shared", "Z_private"])
 @pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
 def test_factor_outputs_must_be_finite(name, bad):
