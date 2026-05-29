@@ -42,6 +42,7 @@ Synthetic instances have `K_shared` factors active across all sections and `K_pr
 | Moran's I over `domain_id` | Spatial coherence of recovered domains. | set when first run lands |
 | ARI(`domain_id`, truth) | Domain recovery. | set when first run lands |
 | Reconstruction error `‖X − Z·Wᵀ‖_F / ‖X‖_F` (+ held-out variant) | Decoder fidelity; computable on real data with no truth. | set when first run lands |
+| Factor redundancy (mean abs off-diagonal corr of `Z`) | Disentanglement of recovered factors (lower = less redundant). | set when first run lands |
 
 ## Planned test placeholders
 
