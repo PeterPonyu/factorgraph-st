@@ -259,3 +259,34 @@ a `counts` assay of raw integer 10x counts, and the spatialLIBD project also
 distributes per-sample `h5_raw` / `h5_filtered` Space Ranger matrices — preferable
 to a normalized-X object under the raw-counts-only policy. This augments the
 existing Tier B DLPFC row rather than adding a new cohort.
+
+## Consolidated ingestion roadmap (registry ↔ issues)
+
+The canonical machine-readable registry is
+[`scripts/data/fetch_datasets.py`](../scripts/data/fetch_datasets.py) (`DATASETS`
+dict). Source-paper citations are in
+[`../manuscript/LITERATURE_LINKS.md`](../manuscript/LITERATURE_LINKS.md). Depth of
+this PR = **framework + registry + data cards** (not full runnable loaders): every
+dataset has a registry entry, contract mapping, and raw-count policy; downloads are
+gated and **only squidpy-backed loaders are wired** — every accession-based direct
+URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
+
+| Registry id | Dataset | Tier | Issue(s) | Fetch status |
+|---|---|---|---|---|
+
+Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
+(fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),
+[#130](https://github.com/PeterPonyu/factorgraph-st/issues/130) (meta: surface the
+05-29 cards / fetch surface / LITERATURE_LINKS into DRAFT PR #40), and the
+data-readiness issues
+[#102](https://github.com/PeterPonyu/factorgraph-st/issues/102) (raw-count
+distribution assumptions) /
+[#103](https://github.com/PeterPonyu/factorgraph-st/issues/103) (ground-truth
+metrics on real data).
+
+> Verify the surface offline:
+> ```bash
+> python scripts/data/fetch_datasets.py --list           # network-free, exit 0
+> python scripts/data/fetch_datasets.py --dataset wang_2025_ist_ffpe_xenium --dry-run
+> python -m pytest tests/data/ -q                         # registry/CLI smoke tests
+> ```
