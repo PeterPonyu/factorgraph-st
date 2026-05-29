@@ -15,6 +15,7 @@ only.
 | `gse175540_rcc` | gse175540_rcc_visium | #36 |
 | `hest1k` | hest1k_cancer_subset | #37 |
 | `janesick2023` | xenium_breast_janesick | #38 |
+| `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
 
 ---
 
@@ -50,6 +51,11 @@ using integrated single-cell, spatial and in situ analysis*, *Nature
 Communications* 14, 8353. Data: 10x
 [Xenium human breast demo](https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast)
 (GEO GSE243280 mirror). Tracks #38.
+
+### `gse293199_tnbc` — TNBC Xenium (OmiCLIP source)
+Triple-negative breast cancer Xenium (280-gene panel; OmiCLIP source). Data:
+GEO [GSE293199](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE293199).
+Tracks #39.
 
 ---
 

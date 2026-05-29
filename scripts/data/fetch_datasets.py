@@ -226,6 +226,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(1.5 * GB),
             notes="Canonical single-cell-resolution breast Xenium (313-gene panel).",
         ),
+        Dataset(
+            id="gse293199_tnbc_xenium",
+            title="GSE293199 (TNBC Xenium)",
+            platform="Xenium",
+            tier="A",
+            accession="GEO GSE293199",
+            landing_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE293199",
+            citation_key="gse293199_tnbc",
+            issues=(39,),
+            raw_count_policy="cell_feature_matrix.h5 inside nested *_Xenium_outs.tar.gz in GSE293199_RAW.tar",
+            contract=_CONTRACT_IMAGING,
+            source_kind="geo",
+            approx_bytes=int(14.6 * GB),
+            notes="Single ~14.6 GB nested tarball (no trivial 3 GB subset). OmiCLIP source, 280-gene panel.",
+        ),
     )
 }
 
