@@ -151,6 +151,21 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(23.6 * GB),
             notes="Imaging-ST arm of the matched Cervilla tumours.",
         ),
+        Dataset(
+            id="cervilla_2026_xenium_mt_5k",
+            title="Cervilla 2026 — Xenium Multi-Tissue & 5K (6 cancer types)",
+            platform="Xenium Multi-Tissue + Human Prime 5K",
+            tier="A",
+            accession="Zenodo 18000256",
+            landing_url="https://zenodo.org/records/18000256",
+            citation_key="cervilla2026",
+            issues=(34,),
+            raw_count_policy="cell_feature_matrix.h5 per panel (377-gene MT + 5K); raw int counts",
+            contract=_CONTRACT_IMAGING,
+            source_kind="zenodo",
+            approx_bytes=int(46.8 * GB),
+            notes="High-plex (5K) imaging arm; completes the three-platform matched set.",
+        ),
     )
 }
 

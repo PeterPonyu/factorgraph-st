@@ -275,6 +275,7 @@ URL stays an ⚠️ UNVERIFIED guarded stub until resolved.
 |---|---|---|---|---|
 | `cervilla_2026_visium` | Cervilla Visium/HD | A | [#32](https://github.com/PeterPonyu/factorgraph-st/issues/32) | stub (URL UNVERIFIED) |
 | `cervilla_2026_xenium_cosmx` | Cervilla Xenium & CosMx | A | [#33](https://github.com/PeterPonyu/factorgraph-st/issues/33) | stub (URL UNVERIFIED) |
+| `cervilla_2026_xenium_mt_5k` | Cervilla Xenium-MT & 5K | A | [#34](https://github.com/PeterPonyu/factorgraph-st/issues/34) | stub (URL UNVERIFIED) |
 
 Related tracking: [#52](https://github.com/PeterPonyu/factorgraph-st/issues/52)
 (fetch CLI test coverage — closed by `tests/data/test_fetch_datasets_cli.py`),
