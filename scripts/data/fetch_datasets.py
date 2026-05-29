@@ -241,6 +241,26 @@ DATASETS: dict[str, Dataset] = {
             approx_bytes=int(14.6 * GB),
             notes="Single ~14.6 GB nested tarball (no trivial 3 GB subset). OmiCLIP source, 280-gene panel.",
         ),
+        # ---- Tier B — Python-native quick-load --------------------------- #
+        Dataset(
+            id="dlpfc_maynard_2021",
+            title="DLPFC 12-section Visium (Maynard 2021 / spatialLIBD)",
+            platform="Visium v1",
+            tier="B",
+            accession="figshare 22004273 (DOI 10.6084/m9.figshare.22004273.v2); spatialLIBD",
+            landing_url="https://figshare.com/articles/dataset/22004273",
+            citation_key="maynard2021",
+            issues=(41, 133),
+            raw_count_policy=(
+                "figshare X is normalized (raw UMIs in .raw); prefer spatialLIBD::fetch_data('spe') "
+                "counts assay or per-sample h5_raw Space Ranger matrices for raw int counts (#41)"
+            ),
+            contract=_CONTRACT_VISIUM,
+            source_kind="figshare",
+            approx_bytes=int(1.3 * GB),
+            card="dlpfc_maynard_2021.yaml",
+            notes="Primary multi-section domain benchmark: 12 sections, 3 donors, manual layer labels.",
+        ),
     )
 }
 

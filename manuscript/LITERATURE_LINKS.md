@@ -16,6 +16,7 @@ only.
 | `hest1k` | hest1k_cancer_subset | #37 |
 | `janesick2023` | xenium_breast_janesick | #38 |
 | `gse293199_tnbc` | gse293199_tnbc_xenium | #39 |
+| `maynard2021` | dlpfc_maynard_2021 | #41, #133 |
 
 ---
 
@@ -56,6 +57,16 @@ Communications* 14, 8353. Data: 10x
 Triple-negative breast cancer Xenium (280-gene panel; OmiCLIP source). Data:
 GEO [GSE293199](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE293199).
 Tracks #39.
+
+## Tier B — Python-native quick-load
+
+### `maynard2021` — DLPFC 12-section Visium
+Maynard et al. 2021, *Transcriptome-scale spatial gene expression in the human
+dorsolateral prefrontal cortex*, *Nature Neuroscience* 24, 425–436.
+DOI [10.1038/s41593-020-00787-0](https://doi.org/10.1038/s41593-020-00787-0).
+Data: figshare [22004273](https://figshare.com/articles/dataset/22004273)
+(DOI 10.6084/m9.figshare.22004273.v2) / Bioconductor `spatialLIBD`. Tracks
+#41, #133.
 
 ---
 
