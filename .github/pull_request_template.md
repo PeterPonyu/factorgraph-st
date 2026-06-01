@@ -4,11 +4,26 @@ FactorGraph-ST pull request template.
 
 ## Summary
 
-<one-paragraph description of the change>
+<!-- One-paragraph description of the change. -->
 
-## Closes / refs
+## Cross-references
 
-Closes #<issue>
+<!-- Link every related issue using the correct keyword:
+     - `Closes #N`  — fully resolves the issue (auto-closes on merge)
+     - `Refs #N`    — partial / related work that does NOT close the issue
+     - `Part of #N` — contributes to a larger meta-issue or roadmap
+
+  List ALL issues this PR touches, one per line. Examples:
+    Closes #42
+    Refs #17, #23
+    Part of #130
+-->
+
+Closes #
+
+## Test plan
+
+- [ ] <!-- How to verify this change (command, screenshot, etc.). -->
 
 ## Independence and provenance checklist
 
