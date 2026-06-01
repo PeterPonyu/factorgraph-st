@@ -25,12 +25,26 @@ def decode_factors(
     K_shared: int = 4,
     K_private: int = 2,
     n_domains: int = 5,
+    coords: np.ndarray | None = None,
+    edges: np.ndarray | None = None,
+    section_id: np.ndarray | None = None,
+    seed: int = 0,
 ) -> FactorGraphOutputs:
     """Decode deterministic nonnegative factors from ``H`` and ``X``.
 
     This is a lightweight baseline implementation that satisfies the MVP schema:
     activations are rectified embeddings and loadings are least-squares estimates
     clipped to nonnegative values.
+
+    When ``section_id`` is provided, each private factor column ``k`` is
+    section-gated (zeroed outside section ``unique(section_id)[k % n_sections]``)
+    so the decoder's ``Z_private`` mirrors the generator's section-private
+    semantics — train and inference share the same conditioning instead of
+    silently dropping ``section_id`` on the floor.
+
+    Spatial domains are assigned by a deterministic k-means pass on the
+    z-normalized joint feature ``[H | coords]``. Passing ``coords=None``
+    falls back to clustering on ``H`` alone (purely embedding-based).
     """
     if K_shared < 0 or K_private < 0:
         raise ValueError("K_shared and K_private must be non-negative")
@@ -41,8 +55,16 @@ def decode_factors(
     basis = _positive_basis(H, K_total)
     Z_shared = basis[:, :K_shared].astype(np.float32, copy=False)
     Z_private = basis[:, K_shared:].astype(np.float32, copy=False)
-    W = _fit_nonnegative_loadings(X, basis).astype(np.float32, copy=False)
-    domain_id = _cluster_domains(H, n_domains).astype(np.int64, copy=False)
+    if section_id is not None and Z_private.shape[1] > 0:
+        Z_private = _section_gate_private(Z_private, section_id)
+    Z_full = np.concatenate([Z_shared, Z_private], axis=1)
+    W = _fit_nonnegative_loadings(X, Z_full).astype(np.float32, copy=False)
+    Z_shared, Z_private, W = _apply_canonical_gauge(Z_shared, Z_private, W)
+    if coords is None:
+        coords = np.zeros((H.shape[0], 0), dtype=np.float32)
+    domain_id = _cluster_domains(
+        H, coords, n_domains, edges=edges, seed=seed
+    ).astype(np.int64, copy=False)
     return FactorGraphOutputs(H=H, W=W, Z_shared=Z_shared, Z_private=Z_private, domain_id=domain_id)
 
 
@@ -57,38 +79,313 @@ def fit_transform(
     n_domains: int = 5,
     seed: int = 0,
 ) -> FactorGraphOutputs:
-    """Encode inputs, decode nonnegative factors, and validate MVP outputs."""
+    """Encode inputs, decode nonnegative factors, and validate MVP outputs.
+
+    Pins global RNG state via ``set_seed(seed)`` before encoding so the
+    factor-fit pipeline is reproducible end-to-end (closes #87 for the
+    model side; the generator side is closed by the matching ``set_seed``
+    call in ``synth.generate_instance``).
+    """
+    from factorgraph_st.repro import set_seed
+    set_seed(seed)
     H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
-    outputs = decode_factors(X, H, K_shared=K_shared, K_private=K_private, n_domains=n_domains)
-    validate_outputs(outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1])
+    outputs = decode_factors(
+        X,
+        H,
+        K_shared=K_shared,
+        K_private=K_private,
+        n_domains=n_domains,
+        coords=coords,
+        edges=edges,
+        section_id=section_id,
+        seed=seed,
+    )
+    validate_outputs(
+        outputs.H, outputs.W, outputs.Z_shared, outputs.Z_private, outputs.domain_id, X.shape[0], X.shape[1]
+    )
     return outputs
 
 
 def _positive_basis(H: np.ndarray, n_components: int) -> np.ndarray:
+    """Convert ``H`` into a nonnegative per-column-normalized factor basis.
+
+    Constant or near-constant columns (``std < 1e-12``) are explicitly zeroed
+    rather than divided by an eps floor. The previous ``raw / max(scale, 1e-6)
+    + 1e-6`` formulation amplified microscopic input variation by up to ~1e6×
+    on near-constant columns and left a 1e-6 bias term on truly constant
+    columns — silently corrupting downstream loadings and clustering with a
+    fake signal. See #85.
+    """
     if H.shape[0] == 0:
         return np.empty((0, n_components), dtype=np.float32)
-    if H.shape[1] >= n_components:
-        raw = H[:, :n_components]
-    else:
-        raw = np.pad(H, ((0, 0), (0, n_components - H.shape[1])))
+    if H.shape[1] < n_components:
+        # Closes #69. Previously H was zero-padded; the std=0 columns then
+        # collapsed to the constant 1e-6, silently producing dead factors that
+        # still pass validate_outputs (nonneg + finite). Refuse the misuse
+        # instead so callers learn at the boundary.
+        raise ValueError(
+            f"H.shape[1]={H.shape[1]} < n_components={n_components}; "
+            "require d >= K_shared + K_private so every factor is backed by a "
+            "real embedding column (no zero-padded, constant Z_* columns)."
+        )
+    raw = H[:, :n_components]
     raw = raw - raw.min(axis=0, keepdims=True)
     scale = raw.std(axis=0, keepdims=True)
-    return (raw / np.maximum(scale, 1e-6) + 1e-6).astype(np.float32)
+    low_var = scale < 1e-12
+    safe_scale = np.where(low_var, 1.0, scale)
+    basis = raw / safe_scale
+    # Zero out columns that carried no information so the eps floor cannot
+    # propagate as a fake bias term.
+    basis = np.where(np.broadcast_to(low_var, basis.shape), 0.0, basis)
+    return basis.astype(np.float32)
+
+
+def _section_gate_private(Z_private: np.ndarray, section_id: np.ndarray) -> np.ndarray:
+    """Zero out each private factor outside its assigned section.
+
+    Mirrors the synthetic generator: private column ``k`` is active only on
+    section ``unique(section_id)[k % n_sections]``. Closes #50 — without this,
+    ``decode_factors`` ignores ``section_id`` and ``Z_private`` is identical
+    across permuted section assignments.
+    """
+    sections = np.unique(section_id)
+    if sections.size == 0:
+        return Z_private
+    gated = Z_private.copy()
+    for k in range(gated.shape[1]):
+        s = sections[k % sections.size]
+        gated[section_id != s, k] = 0.0
+    return gated
 
 
 def _fit_nonnegative_loadings(X: np.ndarray, Z: np.ndarray) -> np.ndarray:
+    """Solve column-wise nonnegative least-squares for ``W`` given ``Z`` and ``X``.
+
+    For each gene column ``j``, returns the ``W[j, :]`` that minimizes
+    ``||X[:, j] - Z @ W[j, :].T||_2`` subject to ``W[j, :] >= 0`` via the
+    numpy-only Lawson-Hanson active-set NNLS in :func:`_nnls`. This replaces
+    the prior ``clip(lstsq, 0)`` estimator, which is *not* NNLS — clipping an
+    unconstrained solution yields a biased, non-optimal ``W`` whenever the
+    true optimum has active nonneg constraints. See #83.
+
+    Cost: NNLS is solved independently per gene column, so the loop is
+    ``O(n_features)`` solves. Each solve is a small active-set problem over
+    ``K = Z.shape[1]`` factors (the active set adds at most ``K`` columns and
+    each inner least-squares is ``O(n_spots * K^2)``); since ``K`` is tiny
+    (a handful of factors) the per-column work is dominated by the ``Z``
+    normal-equation products and the loop scales linearly in the gene count.
+    A numpy-only solver keeps the runtime dependency surface at numpy alone.
+    """
     if Z.shape[0] == 0:
-        return np.empty((X.shape[1], Z.shape[1]), dtype=np.float32)
-    coef, *_ = np.linalg.lstsq(Z.astype(np.float64), X.astype(np.float64), rcond=None)
-    return np.clip(coef.T, 0.0, None).astype(np.float32)
+        # Empty input: return deterministic, finite, nonnegative zeros.
+        # np.empty would leak uninitialized memory (often non-finite or
+        # negative), violating the nonnegative-loadings contract.
+        return np.zeros((X.shape[1], Z.shape[1]), dtype=np.float32)
+    Z64 = Z.astype(np.float64, copy=False)
+    X64 = X.astype(np.float64, copy=False)
+    n_features = X64.shape[1]
+    W = np.empty((n_features, Z64.shape[1]), dtype=np.float64)
+    for j in range(n_features):
+        W[j] = _nnls(Z64, X64[:, j])
+    return W.astype(np.float32)
 
 
-def _cluster_domains(H: np.ndarray, n_domains: int) -> np.ndarray:
-    if H.shape[0] == 0:
-        return np.empty(0, dtype=np.int64)
-    n_labels = min(max(int(n_domains), 1), H.shape[0])
-    score = H[:, 0] if H.shape[1] else np.arange(H.shape[0], dtype=np.float32)
-    order = np.argsort(score, kind="mergesort")
-    labels = np.empty(H.shape[0], dtype=np.int64)
-    labels[order] = np.arange(H.shape[0], dtype=np.int64) * n_labels // H.shape[0]
-    return labels
+def _nnls(A: np.ndarray, b: np.ndarray, *, tol: float = 1e-10, max_iter: int | None = None) -> np.ndarray:
+    """Numpy-only nonnegative least squares: minimize ``||A x - b||_2`` s.t. ``x >= 0``.
+
+    Classic Lawson-Hanson active-set algorithm (matches
+    :func:`scipy.optimize.nnls` to floating-point tolerance). Implemented in
+    numpy so the runtime package stays numpy-only; ``A`` is the ``(n_spots, K)``
+    factor matrix and ``b`` is a single ``(n_spots,)`` gene column.
+    """
+    A = np.ascontiguousarray(A, dtype=np.float64)
+    b = np.ascontiguousarray(b, dtype=np.float64)
+    n = A.shape[1]
+    iter_cap = 3 * n if max_iter is None else max_iter
+    AtA = A.T @ A
+    Atb = A.T @ b
+    x = np.zeros(n, dtype=np.float64)
+    passive = np.zeros(n, dtype=bool)
+    w = Atb - AtA @ x
+    outer = 0
+    while not passive.all() and np.max(np.where(passive, -np.inf, w)) > tol:
+        # Move the most-violating active coordinate into the passive set.
+        j = int(np.argmax(np.where(passive, -np.inf, w)))
+        passive[j] = True
+        while True:
+            P = np.where(passive)[0]
+            s = np.zeros(n, dtype=np.float64)
+            s[P] = np.linalg.lstsq(A[:, P], b, rcond=None)[0]
+            if s[P].min() > tol:
+                x = s
+                break
+            # Backtrack toward the unconstrained passive solution until a
+            # passive coordinate hits zero, then drop it from the passive set.
+            mask = passive & (s <= tol)
+            alpha = (x[mask] / (x[mask] - s[mask])).min()
+            x = x + alpha * (s - x)
+            passive &= x > tol
+        w = Atb - AtA @ x
+        outer += 1
+        if outer > iter_cap:
+            break
+    return x
+
+
+def _apply_canonical_gauge(
+    Z_shared: np.ndarray, Z_private: np.ndarray, W: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fix the factor scale gauge of ``X ~= [Z_shared | Z_private] @ Wt``.
+
+    The factorization is invariant to ``Z[:, j] -> Z[:, j] * s_j`` together
+    with ``W[:, j] -> W[:, j] / s_j`` for any ``s_j > 0``. We pin the gauge by
+    choosing ``s_j = ||W[:, j]||_2`` so every loading column has unit L2 norm
+    and the scale is folded into the matching activation column. This is a
+    gauge-only transform: ``Z @ W.T`` is unchanged. Nonnegativity is preserved
+    because all ``s_j >= 0``; zero-norm columns are left untouched (``s_j = 1``)
+    to avoid division by zero.
+    """
+    norms = np.linalg.norm(W, axis=0)
+    scale = np.where(norms > 0.0, norms, 1.0).astype(np.float32)
+    W_n = (W / scale).astype(np.float32)
+    k_shared = Z_shared.shape[1]
+    Z_shared_n = (Z_shared * scale[:k_shared]).astype(np.float32)
+    Z_private_n = (Z_private * scale[k_shared:]).astype(np.float32)
+    return Z_shared_n, Z_private_n, W_n
+
+
+def _cluster_domains(
+    H: np.ndarray,
+    coords: np.ndarray,
+    n_domains: int,
+    *,
+    edges: np.ndarray | None = None,
+    seed: int = 0,
+    n_init: int = 4,
+    max_iter: int = 100,
+) -> np.ndarray:
+    """Assign domain ids over the z-normalized joint feature ``[H | coords]``.
+
+    When ``edges`` is provided, domains are assigned by graph-aware clustering:
+    each connected component of ``edges`` is collapsed to its centroid and the
+    centroids are clustered (see :func:`_cluster_components`), guaranteeing that
+    every connected component receives a single label. When ``edges`` is None or
+    empty, this falls back to a deterministic per-spot k-means on the same
+    z-normalized feature.
+
+    Closes #101 / extends the #75 fix: per-spot k-means on ``[H | coords]`` alone
+    ignores the spatial graph, so coord-overlapping regions are mixed near chance
+    even when the graph cleanly separates them. The component-centroid path keeps
+    graph-connected spots in the same domain.
+    """
+    n = H.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    k = max(1, min(int(n_domains), n))
+    if k == 1:
+        return np.zeros(n, dtype=np.int64)
+
+    parts = []
+    for arr in (H, coords):
+        if arr.size == 0 or arr.shape[1] == 0:
+            continue
+        a = np.asarray(arr, dtype=np.float64)
+        parts.append((a - a.mean(0, keepdims=True)) / np.maximum(a.std(0, keepdims=True), 1e-6))
+    X = np.concatenate(parts, axis=1) if parts else np.zeros((n, 1), dtype=np.float64)
+
+    if edges is not None and edges.size > 0:
+        # Graph-aware path: cluster connected-component centroids. (Replaces the
+        # per-spot k-means below, which is only the no-graph fallback.)
+        return _cluster_components(X, edges, k, seed, n_init, max_iter)
+
+    rng = np.random.default_rng(seed)
+    best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
+    for _ in range(max(1, n_init)):
+        centers = X[rng.choice(n, size=k, replace=False)].copy()
+        labels = np.full(n, -1, dtype=np.int64)
+        for _ in range(max_iter):
+            dists = ((X[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+            new_labels = dists.argmin(axis=1).astype(np.int64)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for c in range(k):
+                mask = labels == c
+                centers[c] = X[mask].mean(0) if mask.any() else X[int(np.argmax(dists.min(1)))]
+        inertia = float(((X - centers[labels]) ** 2).sum())
+        if inertia < best_inertia:
+            best_inertia, best_labels = inertia, labels
+    return best_labels
+
+
+def _cluster_components(
+    X: np.ndarray, edges: np.ndarray, k: int, seed: int, n_init: int, max_iter: int
+) -> np.ndarray:
+    """Graph-aware clustering: k-means over connected-component centroids.
+
+    Per-spot k-means on ``[H | coords]`` is dominated by the random-projection
+    ``H`` and can land a near-chance partition inside spatially coherent
+    regions, so post-hoc label smoothing (which only flips minorities) gets
+    stuck when both regions share the same k-means majority. Instead, we
+    collapse each connected component of ``edges`` to its centroid and
+    cluster the centroids — every component is guaranteed to receive one
+    label, drawn from a k-means run over a much cleaner ``n_components``-by-
+    feature matrix.
+    """
+    n = X.shape[0]
+    roots = _connected_components(edges, n)
+    unique_roots, comp_idx = np.unique(roots, return_inverse=True)
+    n_comp = unique_roots.size
+
+    centroids = np.zeros((n_comp, X.shape[1]), dtype=np.float64)
+    for i in range(n_comp):
+        centroids[i] = X[comp_idx == i].mean(axis=0)
+    if n_comp <= k:
+        # Each component gets its own label (with leftover labels unused).
+        comp_labels = np.arange(n_comp, dtype=np.int64) % k
+    else:
+        comp_labels = _kmeans(centroids, k, seed, n_init, max_iter)
+    return comp_labels[comp_idx].astype(np.int64)
+
+
+def _connected_components(edges: np.ndarray, n: int) -> np.ndarray:
+    """Union-find connected components for the (symmetrized) edge list."""
+    src, dst = edges
+    parent = np.arange(n, dtype=np.int64)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = int(parent[x])
+        return x
+
+    for s, d in zip(src.tolist(), dst.tolist(), strict=True):
+        rs, rd = find(s), find(d)
+        if rs != rd:
+            parent[rs] = rd
+    return np.array([find(i) for i in range(n)], dtype=np.int64)
+
+
+def _kmeans(
+    X: np.ndarray, k: int, seed: int, n_init: int, max_iter: int
+) -> np.ndarray:
+    """Plain k-means returning integer labels; deterministic per ``seed``."""
+    n = X.shape[0]
+    rng = np.random.default_rng(seed)
+    best_inertia, best_labels = np.inf, np.zeros(n, dtype=np.int64)
+    for _ in range(max(1, n_init)):
+        centers = X[rng.choice(n, size=k, replace=False)].copy()
+        labels = np.full(n, -1, dtype=np.int64)
+        for _ in range(max_iter):
+            dists = ((X[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+            new_labels = dists.argmin(axis=1).astype(np.int64)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for c in range(k):
+                mask = labels == c
+                centers[c] = X[mask].mean(0) if mask.any() else X[int(np.argmax(dists.min(1)))]
+        inertia = float(((X - centers[labels]) ** 2).sum())
+        if inertia < best_inertia:
+            best_inertia, best_labels = inertia, labels
+    return best_labels

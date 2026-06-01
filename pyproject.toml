@@ -13,7 +13,16 @@ authors = [{ name = "PeterPonyu", email = "fuzeyu09@gmail.com" }]
 dependencies = ["numpy>=1.26,<3"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+# scipy is a test-only oracle: it cross-checks the numpy-only NNLS solver in
+# decoder.py against scipy.optimize.nnls. The runtime package stays numpy-only,
+# so the stale scipy<2 cap is gone — the test extra tracks current scipy.
+test = ["pytest>=8,<9", "scipy>=1.10", "tomli>=2.0; python_version < '3.11'"]
+dev = ["ruff>=0.5", "mypy>=1.8"]
+# real-data: heavyweight deps used ONLY by the scripts/run_real_factorgraph.py
+# and scripts/compute_further_factorgraph_metrics.py real-data results path
+# (scanpy/anndata h5ad loading, scipy kNN). The runtime package itself stays
+# numpy-only; these are opt-in via `pip install -e '.[real-data]'`.
+real-data = ["scipy>=1.10", "scanpy>=1.10", "anndata>=0.10"]
 # Real multi-section assembly helpers in scripts/data/fetch_datasets.py
 # (build_section_inputs / build_spatial_graph). Not required for the core
 # install or the network-free CLI tests (see issue #52).
@@ -28,3 +37,26 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import sorting, UP: pyupgrade, B: bugbear.
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# results_contract.py is vendored BYTE-IDENTICALLY from the parent orchestration
+# repo (scripts/contract/results_contract.py) and is kept in sync via
+# `make sync-contract`, with byte-identity enforced by
+# tests/test_contract_schema.py. It is authored under the parent's default ruff
+# profile (E/F only), so it predates the UP pyupgrade rules this repo selects
+# (e.g. UP035 collections.abc, UP045 `X | None`). It cannot be modified here
+# without breaking the SHA-256 lock, so its pyupgrade findings are ignored.
+"src/factorgraph_st/results_contract.py" = ["UP"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+ignore_missing_imports = true
