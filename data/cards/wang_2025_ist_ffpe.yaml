@@ -1,0 +1,59 @@
+# Dataset provenance card — schema mirrors scripts/data/fetch_datasets.py:Dataset
+# Crown-jewel matched multi-platform TMA (issues #132, #53).
+id: wang_2025_ist_ffpe
+title: Wang 2025 iST FFPE matched multi-platform TMA (Xenium + MERSCOPE + CosMx)
+tier: A
+platform: Xenium + MERSCOPE + CosMx (matched serial sections)
+tissue: 17 tumor + 16 normal tissue types (tTMA1/tTMA2 + nTMA)
+disease: pan-tissue tumor/normal (33 tissue types)
+citation_key: wang2025_ist
+issues: [132, 53]
+paper:
+  title: Systematic benchmarking of imaging spatial transcriptomics platforms in FFPE tissues
+  authors: Wang, Huang, ... Farhi
+  journal: Nature Communications 16, 10215 (2025)
+  doi: 10.1038/s41467-025-64990-y
+  pmc: PMC12635344
+accession:
+  registry_ids:
+    fetch_datasets:
+      - wang_2025_ist_ffpe_xenium
+      - wang_2025_ist_ffpe_merscope
+      - wang_2025_ist_ffpe_cosmx
+  arms:
+    - arm: Xenium
+      geo: GSE308148
+      bioproject: PRJNA1329034
+      raw_artifact: per-section *_transcripts.parquet (-> cell x gene) + *_cell_boundaries.parquet
+      raw_tar_size_gb: 91.8   # bulk = *_morphology.ome.tif; EXCLUDE per policy
+    - arm: MERSCOPE
+      geo: GSE308147
+      bioproject: PRJNA1329035
+      raw_artifact: cell_by_gene.csv + cell_metadata.csv
+      raw_tar_size_gb: 3.17
+    - arm: CosMx
+      geo: GSE308146
+      raw_artifact: exprMat cell x gene counts + *_cell_metadata.csv (ignore processed .RDS)
+      raw_tar_size_gb: 5.97
+    - arm: scRNA reference
+      geo: GSE308145
+      bioproject: PRJNA1329031
+landing_url: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE308148
+url_verified: false      # GEO RAW.tar are landing-page-confirmed, not re-verified direct here
+license: public (no controlled access)
+raw_count_policy: >-
+  Raw integer count artifacts confirmed downloadable for all three imaging arms.
+  Counts + spatial metadata ONLY: EXCLUDE the bulk *_morphology.ome.tif from the
+  Xenium arm (program policy — no WSIs / morphology TIFFs).
+contract:
+  X: (n_cells, n_genes) float32 raw counts per (platform, TMA, tissue) section
+  coords: (n_cells, 2) float32 cell centroids from each platform's metadata/boundaries
+  section_id: int per (platform, TMA, tissue) section
+  edges: (2, n_edges) int64 generic kNN via build_spatial_graph(coord_type='generic')
+notes: >-
+  THE matched multi-platform regime FactorGraph-ST is built for: same TMA cores
+  on three imaging platforms -> platform is a clean PRIVATE factor while conserved
+  tissue/tumor programs are SHARED factors. Newer (2025) and broader (33 tissue
+  types) than Cervilla's 6 cancer types; imaging-only (no Visium/spot arm), so it
+  complements rather than replaces the Cervilla Visium arm. UNVERIFIED direct
+  URLs — resolve before --download.
