@@ -18,6 +18,11 @@ dependencies = ["numpy>=1.26,<3"]
 # so the stale scipy<2 cap is gone — the test extra tracks current scipy.
 test = ["pytest>=8,<9", "scipy>=1.10", "tomli>=2.0; python_version < '3.11'"]
 dev = ["ruff>=0.5", "mypy>=1.8"]
+# real-data: heavyweight deps used ONLY by the scripts/run_real_factorgraph.py
+# and scripts/compute_further_factorgraph_metrics.py real-data results path
+# (scanpy/anndata h5ad loading, scipy kNN). The runtime package itself stays
+# numpy-only; these are opt-in via `pip install -e '.[real-data]'`.
+real-data = ["scipy>=1.10", "scanpy>=1.10", "anndata>=0.10"]
 
 [project.urls]
 Homepage = "https://github.com/PeterPonyu/factorgraph-st"
