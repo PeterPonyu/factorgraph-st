@@ -37,9 +37,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import numpy as np
@@ -397,7 +398,7 @@ def build_spatial_graph(
     adata: Any,
     n_neighs: int = 6,
     coord_type: str = "grid",
-) -> "np.ndarray":
+) -> np.ndarray:
     """Build a single-section spatial kNN graph as ``(2, n_edges)`` int64 COO.
 
     Visium uses ``coord_type='grid'`` (hex grid); imaging platforms (Xenium,
@@ -419,7 +420,7 @@ def build_section_inputs(
     n_neighs: int = 6,
     coord_type: str = "grid",
     use_raw: bool = True,
-) -> dict[str, "np.ndarray"]:
+) -> dict[str, np.ndarray]:
     """Stack per-section ``AnnData`` into the MVP input contract.
 
     Returns a dict with ``X`` (stacked raw counts, ``float32``), ``coords``

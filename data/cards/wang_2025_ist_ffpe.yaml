@@ -55,6 +55,5 @@ notes: >-
   on three imaging platforms -> platform is a clean PRIVATE factor while conserved
   tissue/tumor programs are SHARED factors. Newer (2025) and broader (33 tissue
   types) than Cervilla's 6 cancer types; imaging-only (no Visium/spot arm), so it
-  complements rather than replaces the Cervilla Visium arm. Cross-repo: the
-  single-cell niche structure is also relevant to niche-lens-st (coordinate to
-  avoid double-filing). UNVERIFIED direct URLs — resolve before --download.
+  complements rather than replaces the Cervilla Visium arm. UNVERIFIED direct
+  URLs — resolve before --download.

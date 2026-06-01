@@ -289,10 +289,8 @@ Cervilla 6-cancer cohort, and **imaging-only** (no Visium/spot arm), so it
 Registry ids: `wang_2025_ist_ffpe_xenium` / `_merscope` / `_cosmx`. Card:
 [`../data/cards/wang_2025_ist_ffpe.yaml`](../data/cards/wang_2025_ist_ffpe.yaml).
 Imaging-ST → `coord_type="generic"`; each `(platform, TMA, tissue-type)` is one
-section. **Cross-repo note:** the single-cell niche structure is also relevant to
-*niche-lens-st* — coordinate with the team lead to avoid double-filing.
-Direct GEO `RAW.tar` URLs are **⚠️ UNVERIFIED** as direct artifacts here; the
-loader stub raises `NotImplementedError` until they are resolved.
+section. Direct GEO `RAW.tar` URLs are **⚠️ UNVERIFIED** as direct artifacts
+here; the loader stub raises `NotImplementedError` until they are resolved.
 
 ## Consolidated ingestion roadmap (registry ↔ issues)
 

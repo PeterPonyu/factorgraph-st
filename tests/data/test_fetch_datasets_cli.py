@@ -17,7 +17,6 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from fetch_datasets import DATASETS, fetch, main
 
 
