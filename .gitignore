@@ -18,6 +18,11 @@ baseline_repos/*
 # OMC runtime state (created if tooling is invoked with this repo as cwd)
 .omc/
 
+# Dataset cache — raw counts + spatial metadata only; cards are tracked
+data/raw/
+data/processed/
+!data/cards/
+
 # Generated outputs
 results/*
 !results/README.md

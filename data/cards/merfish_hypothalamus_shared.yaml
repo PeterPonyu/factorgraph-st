@@ -1,0 +1,31 @@
+# Dataset provenance card — schema mirrors scripts/data/fetch_datasets.py:Dataset
+id: merfish_hypothalamus_shared
+title: MERFISH mouse hypothalamus (Moffitt 2018; 8 AP sections)
+tier: B
+platform: MERFISH (imaging)
+tissue: mouse hypothalamic preoptic region
+disease: none (healthy reference)
+sections: 8            # anterior-posterior levels via obs['Bregma']
+cells: 73655
+genes: 161
+labels: obs['Cell_class']
+citation_key: moffitt2018
+issues: [45]
+accession:
+  squidpy_loader: squidpy.datasets.merfish()
+  raw_counts: Dryad doi:10.5061/dryad.8t8s248   # CC0, ~1.03 GB
+landing_url: https://squidpy.readthedocs.io/en/stable/api/squidpy.datasets.merfish.html
+url_verified: true      # programmatic squidpy loader (importable in dl env, 05-28)
+approx_bytes: null      # squidpy-cached object
+license: CC0 (Dryad raw counts)
+raw_count_policy: >-
+  The squidpy copy is NORMALIZED. For DL training pull raw integer counts from
+  Dryad doi:10.5061/dryad.8t8s248 (UNVERIFIED direct URL) and assert int at load.
+contract:
+  X: (n_cells, n_genes) float32 raw counts (Dryad source for raw)
+  coords: (n_cells, 2) float32 cell centroids; 3D in obsm['spatial3d']
+  section_id: int per AP level (obs['Bregma'], 8 levels)
+  edges: (2, n_edges) int64 generic kNN via build_spatial_graph(coord_type='generic')
+notes: >-
+  Heterogeneous, non-Visium stress test for the section-aware encoder. Shared
+  multi-section anchor across repos in this research program.
