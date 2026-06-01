@@ -42,6 +42,16 @@ target-version = "py310"
 # E/W: pycodestyle, F: pyflakes, I: import sorting, UP: pyupgrade, B: bugbear.
 select = ["E", "W", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# results_contract.py is vendored BYTE-IDENTICALLY from the parent orchestration
+# repo (scripts/contract/results_contract.py) and is kept in sync via
+# `make sync-contract`, with byte-identity enforced by
+# tests/test_contract_schema.py. It is authored under the parent's default ruff
+# profile (E/F only), so it predates the UP pyupgrade rules this repo selects
+# (e.g. UP035 collections.abc, UP045 `X | None`). It cannot be modified here
+# without breaking the SHA-256 lock, so its pyupgrade findings are ignored.
+"src/factorgraph_st/results_contract.py" = ["UP"]
+
 [tool.mypy]
 python_version = "3.10"
 files = ["src"]
