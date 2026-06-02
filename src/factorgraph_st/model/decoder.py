@@ -266,17 +266,25 @@ def _cluster_domains(
 ) -> np.ndarray:
     """Assign domain ids over the z-normalized joint feature ``[H | coords]``.
 
-    When ``edges`` is provided, domains are assigned by graph-aware clustering:
-    each connected component of ``edges`` is collapsed to its centroid and the
-    centroids are clustered (see :func:`_cluster_components`), guaranteeing that
-    every connected component receives a single label. When ``edges`` is None or
+    When ``edges`` is provided, domains are assigned by graph-aware clustering
+    (see :func:`_cluster_components`): the domain budget ``k`` is distributed
+    across the connected components of ``edges`` proportionally to their size
+    (each component gets at least one domain), and a per-spot k-means is run
+    WITHIN each component on the z-normalized feature. When ``edges`` is None or
     empty, this falls back to a deterministic per-spot k-means on the same
     z-normalized feature.
 
     Closes #101 / extends the #75 fix: per-spot k-means on ``[H | coords]`` alone
     ignores the spatial graph, so coord-overlapping regions are mixed near chance
-    even when the graph cleanly separates them. The component-centroid path keeps
-    graph-connected spots in the same domain.
+    even when the graph cleanly separates them. Clustering within each component
+    keeps graph-disconnected regions in separate domains while still resolving
+    multiple domains inside a single connected region.
+
+    Closes #183: the previous implementation collapsed each connected component
+    to a single label, so a single contiguous section (one fully-connected kNN
+    graph → one component) degenerated to ``n_domains_found == 1`` and every
+    domain metric was trivially zero. The intra-component partition recovers
+    multiple domains within one component.
     """
     n = H.shape[0]
     if n == 0:
@@ -321,31 +329,87 @@ def _cluster_domains(
 def _cluster_components(
     X: np.ndarray, edges: np.ndarray, k: int, seed: int, n_init: int, max_iter: int
 ) -> np.ndarray:
-    """Graph-aware clustering: k-means over connected-component centroids.
+    """Graph-aware clustering: intra-component k-means with a per-component budget.
 
-    Per-spot k-means on ``[H | coords]`` is dominated by the random-projection
-    ``H`` and can land a near-chance partition inside spatially coherent
-    regions, so post-hoc label smoothing (which only flips minorities) gets
-    stuck when both regions share the same k-means majority. Instead, we
-    collapse each connected component of ``edges`` to its centroid and
-    cluster the centroids — every component is guaranteed to receive one
-    label, drawn from a k-means run over a much cleaner ``n_components``-by-
-    feature matrix.
+    The domain budget ``k`` is split across the connected components of
+    ``edges`` proportionally to component size (each component gets at least
+    one domain; the components with the largest fractional remainders absorb
+    any leftover budget). A per-spot k-means then runs WITHIN each component
+    on the z-normalized feature ``X`` and the resulting cluster labels are
+    offset so labels never collide across components.
+
+    This keeps graph-DISCONNECTED regions in distinct domains (the
+    multi-section case: each component draws from its own label range) while
+    still resolving MULTIPLE domains inside a SINGLE connected component (the
+    single-section case, #183) — the previous component-centroid collapse gave
+    each component exactly one label, so a single fully-connected slide
+    degenerated to ``n_domains_found == 1`` and all domain metrics were
+    trivially zero.
+
+    When more components exist than the budget allows (``n_comp > k``), the
+    smallest components share labels: components are clustered by centroid into
+    ``k`` groups (the prior behavior for that regime, which is correct — there
+    are not enough labels to give every component a unique one).
     """
     n = X.shape[0]
     roots = _connected_components(edges, n)
-    unique_roots, comp_idx = np.unique(roots, return_inverse=True)
+    unique_roots, comp_idx, comp_sizes = np.unique(
+        roots, return_inverse=True, return_counts=True
+    )
     n_comp = unique_roots.size
 
-    centroids = np.zeros((n_comp, X.shape[1]), dtype=np.float64)
-    for i in range(n_comp):
-        centroids[i] = X[comp_idx == i].mean(axis=0)
-    if n_comp <= k:
-        # Each component gets its own label (with leftover labels unused).
-        comp_labels = np.arange(n_comp, dtype=np.int64) % k
-    else:
+    if n_comp > k:
+        # Not enough labels for one-per-component: cluster component centroids
+        # into k groups (each component still receives a single shared label).
+        centroids = np.zeros((n_comp, X.shape[1]), dtype=np.float64)
+        for i in range(n_comp):
+            centroids[i] = X[comp_idx == i].mean(axis=0)
         comp_labels = _kmeans(centroids, k, seed, n_init, max_iter)
-    return comp_labels[comp_idx].astype(np.int64)
+        return comp_labels[comp_idx].astype(np.int64)
+
+    # n_comp <= k: distribute the k-budget across components by size, then
+    # sub-cluster within each component so single connected regions still yield
+    # multiple domains.
+    budgets = _allocate_budget(comp_sizes.astype(np.int64), k)
+    labels = np.empty(n, dtype=np.int64)
+    next_label = 0
+    for i in range(n_comp):
+        mask = comp_idx == i
+        n_i = int(mask.sum())
+        k_i = min(int(budgets[i]), n_i)
+        if k_i <= 1:
+            labels[mask] = next_label
+            next_label += 1
+            continue
+        sub = _kmeans(X[mask], k_i, seed + i, n_init, max_iter)
+        labels[mask] = sub + next_label
+        next_label += k_i
+    return labels.astype(np.int64)
+
+
+def _allocate_budget(sizes: np.ndarray, k: int) -> np.ndarray:
+    """Split a domain budget ``k`` across components proportionally to ``sizes``.
+
+    Every component receives at least one domain; the remaining ``k - n_comp``
+    domains are handed to the components with the largest size-proportional
+    fractional remainders (largest-remainder / Hamilton apportionment). Assumes
+    ``len(sizes) <= k`` so the per-component minimum of 1 is always satisfiable.
+    """
+    n_comp = sizes.size
+    budgets = np.ones(n_comp, dtype=np.int64)
+    leftover = int(k) - n_comp
+    if leftover <= 0:
+        return budgets
+    total = int(sizes.sum())
+    # Ideal extra share for each component (excluding its guaranteed 1).
+    ideal = sizes.astype(np.float64) / total * leftover
+    floor = np.floor(ideal).astype(np.int64)
+    budgets += floor
+    remaining = leftover - int(floor.sum())
+    if remaining > 0:
+        order = np.argsort(-(ideal - floor))[:remaining]
+        budgets[order] += 1
+    return budgets
 
 
 def _connected_components(edges: np.ndarray, n: int) -> np.ndarray:
