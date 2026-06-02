@@ -27,6 +27,11 @@ real-data = ["scipy>=1.10", "scanpy>=1.10", "anndata>=0.10"]
 # (build_section_inputs / build_spatial_graph). Not required for the core
 # install or the network-free CLI tests (see issue #52).
 data = ["scanpy>=1.10", "squidpy>=1.6", "anndata>=0.10", "scipy>=1.11"]
+# viz: matplotlib is a VISUALIZATION-only dependency used solely by the
+# scripts/visualize/*.py figure scripts (e.g. fig_domain_comparison.py). It is
+# imported LAZILY inside those scripts, so the runtime package stays numpy-only
+# and the figure smoke tests `importorskip("matplotlib")` when it is absent.
+viz = ["matplotlib>=3.6"]
 
 [project.urls]
 Homepage = "https://github.com/PeterPonyu/factorgraph-st"
