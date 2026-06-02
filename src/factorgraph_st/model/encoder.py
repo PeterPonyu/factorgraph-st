@@ -37,6 +37,11 @@ def encode_graph(
         np.add.at(degree, src, 1.0)
     neighbor_mean = neighbor_sum / np.maximum(degree[:, None], 1.0)
 
+    # Global per-gene mean subtraction (NOT per-spot library-size correction).
+    # This assumes the caller already library-size normalized X (see #197: the
+    # real-data runner applies sc.pp.normalize_total -> log1p before encoding).
+    # On raw counts the column mean is dominated by high-library-size spots and
+    # this centering is biased, so callers must normalize upstream.
     centered_x = X - X.mean(axis=0, keepdims=True)
     centered_coords = coords - coords.mean(axis=0, keepdims=True)
     section_scale = max(int(section_id.max(initial=0)), 1)

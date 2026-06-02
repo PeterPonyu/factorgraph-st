@@ -117,6 +117,68 @@ def test_spatial_domain_uses_graph():
     )
 
 
+def test_single_section_yields_multiple_domains():
+    """Regression for #183: a single fully-connected component (one contiguous
+    section) must NOT collapse to one domain label.
+
+    The old ``_cluster_components`` ran union-find over ``edges``; a single
+    Visium slide forms ONE connected component, so ``n_comp == 1`` and every
+    spot received ``domain_id == 0`` (``n_domains_found == 1``) — making all
+    downstream domain metrics trivially zero. The corrected path partitions
+    spatially WITHIN the single component, so a single section with clearly
+    separated spatial clusters recovers ``> 1`` domain.
+    """
+    from factorgraph_st.model import fit_transform
+
+    rng = np.random.default_rng(0)
+    # A contiguous CONNECTED grid (mimics one Visium slide): a single kNN graph
+    # over a dense lattice is one fully-connected component. We split the grid
+    # into three spatial bands as ground truth.
+    side = 15
+    gx, gy = np.meshgrid(np.arange(side), np.arange(side))
+    coords = np.stack([gx.ravel(), gy.ravel()], axis=1).astype(np.float32)
+    coords += rng.normal(scale=0.05, size=coords.shape).astype(np.float32)
+    n = coords.shape[0]
+    # Three horizontal bands → contiguous spatial domains within one component.
+    truth = (coords[:, 1] // (side / 3.0)).astype(np.int64)
+    truth = np.clip(truth, 0, 2)
+    X = rng.exponential(size=(n, 8)).astype(np.float32)
+    section_id = np.zeros(n, dtype=np.int64)
+
+    # Global kNN over the contiguous lattice → ONE connected component.
+    d2 = ((coords[:, None, :] - coords[None, :, :]) ** 2).sum(-1)
+    np.fill_diagonal(d2, np.inf)
+    kk = 6
+    nn = np.argpartition(d2, kk - 1, axis=1)[:, :kk]
+    src = np.repeat(np.arange(n), kk)
+    dst = nn.reshape(-1)
+    edges = np.stack(
+        [np.concatenate([src, dst]), np.concatenate([dst, src])]
+    ).astype(np.int64)
+    # Sanity: this fixture is genuinely a single connected component.
+    from factorgraph_st.model.decoder import _connected_components
+
+    assert np.unique(_connected_components(edges, n)).size == 1
+
+    out = fit_transform(
+        X, coords, section_id, edges,
+        d=8, K_shared=2, K_private=2, n_domains=3, seed=0,
+    )
+    n_found = int(np.unique(out.domain_id).size)
+    assert n_found > 1, (
+        f"single-section input collapsed to {n_found} domain(s); the "
+        "connected-component-collapse degeneracy (#183) is not fixed."
+    )
+    # The partition is spatially meaningful (well above the 1/3 chance floor),
+    # though boundary spots mix because the random-projection H is concatenated
+    # into the clustering feature (see #101). The #183 ask is non-degeneracy
+    # (>1 domain) with a spatially coherent partition, not exact ARI parity.
+    assert _purity(out.domain_id, truth) > 0.6, (
+        "intra-section partition should recover the three spatial bands well "
+        "above the 1/3 chance level."
+    )
+
+
 def test_section_id_used():
     """Regression for #50: decode_factors must consume section_id so train and
     inference share the same private-factor semantics. Two runs with the same
