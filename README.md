@@ -6,6 +6,10 @@ FactorGraph-ST is an independent spatial-transcriptomics method project for inte
 
 The project centers on a future model that combines graph neural encoders with nonnegative shared/private factor decoding so each learned factor can be inspected as a spatial gene program, section effect, or domain-associated signal.
 
+## Current implementation status
+
+The code in `src/factorgraph_st/` today is a **deterministic, non-learned reference implementation (MVP baseline)**, not the planned learned model. `encode_graph` (`model/encoder.py`) applies a single neighbor-mean aggregation over the spatial graph and then a **fixed random Gaussian projection** — it has no trained parameters and no message passing beyond one hop. `decode_factors` (`model/decoder.py`) rectifies the embedding and fits gene loadings by clipped nonnegative least squares; it is not a learned NMF. The learned "graph neural encoder" described above is planned, not yet implemented.
+
 ## Baseline references
 
 - Primary reference implementation for comparison and design pressure: INSPIRE (`jiazhao97/INSPIRE`).
