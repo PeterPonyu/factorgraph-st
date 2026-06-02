@@ -1,0 +1,14 @@
+{
+  "asset_id": "FG-F1",
+  "project": "factorgraph-st",
+  "role": "spatial-domain map — factor spatial maps figure showing learned factor loadings overlaid on tissue section",
+  "readiness_status": "planned",
+  "source_metric_reference": "planned",
+  "source_script_reference": "planned",
+  "source_exists": false,
+  "metric_source_exists": false,
+  "artifact_exists": false,
+  "supports_safe_prose": false,
+  "paper_claim_ready": false,
+  "notes": "Stub metric record for reproducibility tracking; not paper-claim-ready until claim ID, benchmark metric artifact, data card, and rendered figure are validated. Factor metrics (mean_factor_coherence, factor_diversity, mean_factor_spatial_entropy) await the learned-model rebuild (#181)."
+}
