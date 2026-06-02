@@ -18,6 +18,12 @@ dependencies = ["numpy>=1.26,<3"]
 # so the stale scipy<2 cap is gone — the test extra tracks current scipy.
 test = ["pytest>=8,<9", "scipy>=1.10", "tomli>=2.0; python_version < '3.11'"]
 dev = ["ruff>=0.5", "mypy>=1.8"]
+# model: the opt-in trainable GNN encoder (src/factorgraph_st/model/gnn_encoder.py,
+# issue #181). torch is NOT a core dependency — the default fit path is the
+# numpy-only random projection. Install with `pip install -e '.[model]'` to use
+# `fit_transform(..., encoder="gnn")`. Selecting the GNN encoder without this
+# extra raises a clear ImportError.
+model = ["torch>=2.0"]
 # real-data: heavyweight deps used ONLY by the scripts/run_real_factorgraph.py
 # and scripts/compute_further_factorgraph_metrics.py real-data results path
 # (scanpy/anndata h5ad loading, scipy kNN). The runtime package itself stays
