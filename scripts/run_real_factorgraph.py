@@ -62,6 +62,7 @@ from factorgraph_st.eval.metrics import (
     weighted_dice,
 )
 from factorgraph_st.model.decoder import fit_transform
+from factorgraph_st.model.learned import fit_transform_gnmf
 from factorgraph_st.schemas import validate_inputs
 
 # Default dataset path, relative to the PARENT orchestration repo root (this
@@ -133,6 +134,36 @@ def _parse_args() -> argparse.Namespace:
             "supervised ARI (#179). Default None = auto-detect "
             f"({', '.join(_GT_OBS_KEY_CANDIDATES)}); ARI is skipped if none present."
         ),
+    )
+    parser.add_argument(
+        "--model",
+        choices=("projection", "gnmf"),
+        default="projection",
+        help=(
+            "Factor model. 'projection' (default) = the existing fixed random "
+            "Gaussian projection encoder + NNLS loadings + [H|coords] domains "
+            "(unchanged). 'gnmf' = the OPT-IN trained graph-regularized NMF "
+            "(model/learned.py): spatial coherence is learned via the graph "
+            "Laplacian and domains are clustered on H alone."
+        ),
+    )
+    parser.add_argument(
+        "--gnmf-lam",
+        type=float,
+        default=1.0,
+        help="GNMF graph-regularization strength lam (only used when --model gnmf).",
+    )
+    parser.add_argument(
+        "--gnmf-n-iter",
+        type=int,
+        default=200,
+        help="GNMF maximum multiplicative-update iterations (only when --model gnmf).",
+    )
+    parser.add_argument(
+        "--gnmf-tol",
+        type=float,
+        default=1e-4,
+        help="GNMF relative objective-change early-stop tolerance (only when --model gnmf).",
     )
     return parser.parse_args()
 
@@ -396,17 +427,36 @@ def main() -> None:
 
     # --- 4. Validate + fit ----------------------------------------------------
     validate_inputs(X, coords, section_id, edges)
-    out = fit_transform(
-        X,
-        coords,
-        section_id,
-        edges,
-        d=args.d,
-        K_shared=args.k_shared,
-        K_private=args.k_private,
-        n_domains=args.n_domains,
-        seed=args.seed,
-    )
+    gnmf_result = None
+    if args.model == "gnmf":
+        # OPT-IN trained model: graph-regularized NMF (numpy-only). Spatial
+        # coherence is LEARNED via the Laplacian regularizer on `edges`, not by
+        # baking coords into the features, and domains are clustered on the
+        # factor scores H ALONE -- so morans_i_domain is no longer high by
+        # construction. We still emit the Moran's permutation null for honesty.
+        out, gnmf_result = fit_transform_gnmf(
+            X,
+            edges,
+            K_shared=args.k_shared,
+            K_private=args.k_private,
+            n_domains=args.n_domains,
+            lam=args.gnmf_lam,
+            n_iter=args.gnmf_n_iter,
+            tol=args.gnmf_tol,
+            seed=args.seed,
+        )
+    else:
+        out = fit_transform(
+            X,
+            coords,
+            section_id,
+            edges,
+            d=args.d,
+            K_shared=args.k_shared,
+            K_private=args.k_private,
+            n_domains=args.n_domains,
+            seed=args.seed,
+        )
 
     # --- 5. Intrinsic metrics (+ supervised ARI iff GT labels present, #179) -
     morans_real = morans_i(out.domain_id.astype(np.float64), edges)
@@ -459,6 +509,13 @@ def main() -> None:
     if gt_domain_metrics is not None:
         metrics.update(gt_domain_metrics)
     metrics.update(_factor_stats(out))
+    # Learning evidence is emitted ONLY on the trained path so the projection
+    # run's metrics stay byte-for-byte unchanged.
+    if gnmf_result is not None:
+        metrics["gnmf_objective_initial"] = float(gnmf_result.objective[0])
+        metrics["gnmf_objective_final"] = float(gnmf_result.objective[-1])
+        metrics["gnmf_n_iter_run"] = float(gnmf_result.n_iter_run)
+        metrics["gnmf_lam"] = float(args.gnmf_lam)
 
     runtime_s = time.perf_counter() - t0
 
@@ -509,6 +566,43 @@ def main() -> None:
             else "domain clustering produced multiple domains"
         ),
     }
+    if args.model == "gnmf" and gnmf_result is not None:
+        # OPT-IN trained path: replace the projection caveat with the honest
+        # learned-model description. The morans-by-construction artifact is gone
+        # because coordinates are never a clustering input here.
+        interpretability = {
+            "model_is_learned": True,
+            "encoder": (
+                "trained graph-regularized NMF (model/learned.py): multiplicative "
+                "updates minimizing ||X - H W^T||_F^2 + lam*Tr(H^T L H) over H,W>=0, "
+                "L = D - A the unnormalized Laplacian of the spatial kNN graph"
+            ),
+            "factor_basis": "learned nonnegative factor scores H (gauge-normalized loadings)",
+            "loadings": "learned nonnegative gene loadings W from the GNMF fit",
+            "domain_assignment": (
+                "k-means on the learned factor scores H ALONE (no coords, no graph); "
+                "spatial coherence is learned via the Laplacian regularizer, not baked "
+                "into the features"
+            ),
+            "caveat": (
+                "morans_i_domain is NOT high by construction here: coordinates are never "
+                "an encoder feature nor a clustering input, so domain_id cannot re-read "
+                "out the coordinates. It is still reported against morans_i_domain_null "
+                "for honesty."
+            ),
+            "lam": float(args.gnmf_lam),
+            "n_iter_run": int(gnmf_result.n_iter_run),
+            "objective_initial": float(gnmf_result.objective[0]),
+            "objective_final": float(gnmf_result.objective[-1]),
+            "domain_clustering_degenerate": bool(domain_degenerate),
+            "domain_count_found": n_domains_found,
+            "domain_degeneracy_reason": (
+                "domain clustering collapsed to a single label; with one domain "
+                "morans_i_domain is trivially 0. Inspect n_domains / the learned H."
+                if domain_degenerate
+                else "domain clustering produced multiple domains"
+            ),
+        }
     run_metadata = {
         "dataset_paths": [str(h5ad_path)],
         "n_obs": n_obs,
@@ -541,6 +635,18 @@ def main() -> None:
             "learned model -- see interpretability block."
         ),
     }
+    if args.model == "gnmf":
+        # Override only on the trained path; the projection run_metadata above is
+        # left byte-for-byte unchanged.
+        run_metadata["model"] = "gnmf"
+        run_metadata["notes"] = (
+            "OPT-IN trained graph-regularized NMF (model/learned.py): X ~= H W^T "
+            "minimized with a graph-Laplacian smoothness penalty (lam="
+            f"{args.gnmf_lam}); spatial coherence is LEARNED via the graph, not baked "
+            "into features, and domains are clustered on the factor scores H alone. "
+            "Single-section run (section_id all zeros); shared_private_separation "
+            "degenerates (single_section=True)."
+        )
 
     paths = results_contract.write_results(
         project="factorgraph-st",
@@ -556,6 +662,10 @@ def main() -> None:
     print(f"Wrote outputs:      {factors_npz}")
     print(f"morans_i_domain={morans_real:.6f} null={morans_null:.6f} "
           f"delta={morans_real - morans_null:.6f} runtime_s={runtime_s:.2f}")
+    if gnmf_result is not None:
+        print(f"model=gnmf lam={args.gnmf_lam} objective "
+              f"{gnmf_result.objective[0]:.4f} -> {gnmf_result.objective[-1]:.4f} "
+              f"over {gnmf_result.n_iter_run} iters")
     if ari_domain is not None:
         print(f"ari_domain={ari_domain:.6f} (vs obs[{gt_key_used!r}], "
               f"{n_gt_labeled} labeled spots)")
