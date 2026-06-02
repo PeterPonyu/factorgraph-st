@@ -19,12 +19,20 @@ because it sums over the *set* of classes, not over their integer codes.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
+    boundary_f1,
+    boundary_precision,
+    boundary_recall,
+    calinski_harabasz,
     label_invariant_cluster_coherence,
     matched_factor_correlation,
+    normalized_mutual_information,
     shared_private_separation,
+    silhouette,
+    weighted_dice,
 )
 
 
@@ -190,3 +198,131 @@ def test_recovery_square_unaffected():
     truth = rng.normal(size=(40, 3)).astype(np.float32)
     est = truth[:, ::-1].copy()  # same factors, permuted columns
     assert matched_factor_correlation(est, truth) > 0.99
+
+
+# --------------------------------------------------------------------------- #
+# Domain-quality metric suite (NMI / silhouette / Calinski-Harabasz /
+# boundary precision-recall-F1 / weighted Dice). Deterministic synthetic
+# fixtures: a perfect prediction must score the ideal value, a degenerate
+# single-label prediction must score sensibly (not "perfect"), and a scrambled
+# prediction must score strictly lower than the perfect one.
+# --------------------------------------------------------------------------- #
+
+
+def _line_graph(n: int) -> np.ndarray:
+    """Undirected chain graph 0-1-2-...-(n-1) as a (2, 2*(n-1)) COO edge array."""
+    src = np.arange(n - 1, dtype=np.int64)
+    dst = np.arange(1, n, dtype=np.int64)
+    return np.array([np.concatenate([src, dst]), np.concatenate([dst, src])], dtype=np.int64)
+
+
+def _two_block_labels() -> np.ndarray:
+    """10-spot line split into two contiguous domains (one interior boundary)."""
+    return np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.int64)
+
+
+def _separated_embedding() -> tuple[np.ndarray, np.ndarray]:
+    """Three well-separated Gaussian blobs in 2D with their domain labels."""
+    rng = np.random.default_rng(0)
+    centers = np.array([[0.0, 0.0], [50.0, 0.0], [0.0, 50.0]])
+    labels = np.repeat(np.arange(3, dtype=np.int64), 15)
+    X = np.repeat(centers, 15, axis=0) + rng.normal(scale=0.5, size=(45, 2))
+    return X.astype(np.float64), labels
+
+
+def test_nmi_perfect_and_relabel_invariant():
+    """Identical-up-to-relabel partitions score NMI == 1.0."""
+    true = np.array([0, 0, 1, 1, 2, 2])
+    perfect = np.array([7, 7, 3, 3, 9, 9])  # bijective relabel of `true`
+    assert normalized_mutual_information(true, perfect) == pytest.approx(1.0)
+    assert normalized_mutual_information(true, true.copy()) == pytest.approx(1.0)
+
+
+def test_nmi_degenerate_and_scrambled():
+    """Single-label cases are sensible and a scrambled pred scores lower."""
+    # Both partitions a single cluster -> trivially identical -> 1.0.
+    assert normalized_mutual_information(np.zeros(6, int), np.zeros(6, int)) == pytest.approx(1.0)
+    # One side collapsed, the other informative -> 0.0 (independent), not 1.0.
+    assert normalized_mutual_information(np.array([0, 0, 1, 1]), np.zeros(4, int)) == pytest.approx(0.0)
+    # n < 2 -> not evaluable.
+    assert np.isnan(normalized_mutual_information(np.array([0]), np.array([0])))
+    # A scrambled prediction scores strictly below the perfect partition.
+    true = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2])
+    scrambled = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2])
+    assert normalized_mutual_information(true, scrambled) < normalized_mutual_information(true, true.copy())
+
+
+def test_silhouette_separated_vs_degenerate():
+    """Well-separated blobs score high; <2 labels is not evaluable (NaN)."""
+    X, labels = _separated_embedding()
+    value = silhouette(X, labels)
+    assert 0.9 < value <= 1.0
+    # A single cluster (k < 2) is undefined.
+    assert np.isnan(silhouette(X, np.zeros(X.shape[0], dtype=np.int64)))
+    # A scrambled label assignment is far less coherent than the true blobs.
+    rng = np.random.default_rng(1)
+    scrambled = rng.permutation(labels)
+    assert silhouette(X, scrambled) < value
+
+
+def test_calinski_harabasz_separated_vs_overlapping():
+    """CH is large for separated blobs, smaller for scrambled, NaN for k<2."""
+    X, labels = _separated_embedding()
+    separated = calinski_harabasz(X, labels)
+    assert separated > 100.0
+    rng = np.random.default_rng(2)
+    scrambled = rng.permutation(labels)
+    assert calinski_harabasz(X, scrambled) < separated
+    assert np.isnan(calinski_harabasz(X, np.zeros(X.shape[0], dtype=np.int64)))
+
+
+def test_boundary_metrics_perfect_and_scrambled():
+    """Perfect prediction -> P=R=F1=1; an over-segmented pred has lower precision."""
+    true = _two_block_labels()
+    edges = _line_graph(true.size)
+    perfect = np.where(true == 0, 4, 9)  # bijective relabel -> identical boundaries
+    assert boundary_precision(true, perfect, edges) == pytest.approx(1.0)
+    assert boundary_recall(true, perfect, edges) == pytest.approx(1.0)
+    assert boundary_f1(true, perfect, edges) == pytest.approx(1.0)
+
+    # Alternating labels mark almost every spot as a boundary: recall stays
+    # perfect (the true boundary is included) but precision collapses, so F1
+    # is strictly below the perfect prediction's F1.
+    scrambled = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1], dtype=np.int64)
+    assert boundary_precision(true, scrambled, edges) < 1.0
+    assert boundary_f1(true, scrambled, edges) < 1.0
+
+
+def test_boundary_metrics_no_boundary_is_nan():
+    """A single-domain GT has no boundary spots -> recall undefined (NaN)."""
+    true = np.zeros(6, dtype=np.int64)
+    edges = _line_graph(6)
+    # No predicted boundary either -> precision undefined.
+    assert np.isnan(boundary_precision(true, np.zeros(6, dtype=np.int64), edges))
+    assert np.isnan(boundary_recall(true, np.zeros(6, dtype=np.int64), edges))
+
+
+def test_weighted_dice_perfect_degenerate_scrambled():
+    """Weighted Dice: perfect=1.0, relabel-invariant, scrambled<1, degenerate sensible."""
+    true = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2])
+    perfect = np.array([5, 5, 5, 8, 8, 1, 1, 1, 1])  # bijective relabel
+    assert weighted_dice(true, perfect) == pytest.approx(1.0)
+    assert weighted_dice(true, true.copy()) == pytest.approx(1.0)
+
+    # A single-label prediction cannot exceed the best single-domain overlap.
+    single = weighted_dice(true, np.zeros(true.size, dtype=np.int64))
+    assert 0.0 < single < 1.0
+
+    # A scrambled prediction overlaps every GT domain only partially.
+    scrambled = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2])
+    assert weighted_dice(true, scrambled) < 1.0
+
+
+def test_metric_suite_length_validation():
+    """Mismatched label-array lengths raise (no silent broadcasting)."""
+    with pytest.raises(ValueError):
+        normalized_mutual_information(np.array([0, 1]), np.array([0, 1, 2]))
+    with pytest.raises(ValueError):
+        weighted_dice(np.array([0, 1]), np.array([0, 1, 2]))
+    with pytest.raises(ValueError):
+        boundary_f1(np.array([0, 1]), np.array([0, 1, 2]), _line_graph(2))
