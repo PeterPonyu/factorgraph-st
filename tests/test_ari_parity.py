@@ -171,7 +171,7 @@ def test_gt_domain_metrics_skipped_when_absent():
     mod = _load_runner()
     adata = _adata_with_obs({"in_tissue": np.ones(12, dtype=int)})  # Br2719-like
     out = _fake_out(np.array([0, 1] * 6), np.zeros((12, 2), dtype=np.float64))
-    assert mod._compute_gt_domain_metrics(adata, out, _line_edges(12), None) is None
+    assert mod._compute_gt_domain_metrics(adata, out.domain_id, out.H, _line_edges(12), None) is None
 
 
 def test_gt_domain_metrics_perfect_prediction():
@@ -187,7 +187,7 @@ def test_gt_domain_metrics_perfect_prediction():
     embedding = np.repeat(centers, 4, axis=0) + np.random.default_rng(0).normal(scale=0.3, size=(12, 2))
     out = _fake_out(domain_id, embedding)
 
-    suite = mod._compute_gt_domain_metrics(adata, out, _line_edges(12), None)
+    suite = mod._compute_gt_domain_metrics(adata, out.domain_id, out.H, _line_edges(12), None)
     assert suite is not None
     assert suite["nmi_domain"] == pytest.approx(1.0)
     assert suite["weighted_dice_domain"] == pytest.approx(1.0)
@@ -206,7 +206,7 @@ def test_gt_domain_metrics_drops_na_spots():
     domain_id = np.array([3, 3, 9, 7, 7, 1], dtype=np.int64)
     embedding = np.array([[0.0], [0.1], [9.0], [5.0], [5.1], [1.0]])
     out = _fake_out(domain_id, embedding)
-    suite = mod._compute_gt_domain_metrics(adata, out, _line_edges(6), None)
+    suite = mod._compute_gt_domain_metrics(adata, out.domain_id, out.H, _line_edges(6), None)
     assert suite is not None
     # Four labeled spots ([L1,L1,L2,L2]) remain; the relabeling is perfect.
     assert suite["nmi_domain"] == pytest.approx(1.0)
