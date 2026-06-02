@@ -22,8 +22,9 @@ This runner pairs every reported ``morans_i_domain`` with a permutation-shuffled
 null (``morans_i_domain_null``) and records a mandatory interpretability block so
 the value is only ever interpreted as a delta over chance.
 
-This script lives entirely in the runner: densify, conditional log1p, and the
-kNN edge build are runner-local; no model source is touched.
+This script lives entirely in the runner: densify, normalization
+(``normalize_total`` -> ``log1p`` on count-like input, optional HVG selection),
+and the kNN edge build are runner-local; no model source is touched.
 
 Usage (under the project conda env)::
 
@@ -90,7 +91,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--already-normalized",
         action="store_true",
-        help="Skip the conditional log1p; assume X is already normalized.",
+        help="Skip normalize_total + log1p; assume X is already normalized.",
+    )
+    parser.add_argument(
+        "--target-sum",
+        type=float,
+        default=1e4,
+        help="Library-size target for sc.pp.normalize_total (default 1e4).",
+    )
+    parser.add_argument(
+        "--n-hvg",
+        type=int,
+        default=0,
+        help=(
+            "If > 0, select this many highly variable genes (and subset X) "
+            "after normalization. Default 0 = keep all genes."
+        ),
     )
     return parser.parse_args()
 
@@ -104,6 +120,49 @@ def _looks_like_raw_counts(X) -> bool:
     sample = X[: min(X.shape[0], 100)]
     sample = sample.toarray() if sp.issparse(sample) else np.asarray(sample)
     return bool(np.allclose(sample, np.round(sample)))
+
+
+def _preprocess(adata, *, already_normalized: bool, n_hvg: int, target_sum: float = 1e4) -> dict:
+    """Apply the standard ST preprocessing in place and return a manifest dict.
+
+    Closes #197. The previous path applied only a heuristic ``log1p`` and never
+    library-size normalized, so per-spot total-count variance dominated the
+    encoder input (the encoder column-mean-centers but assumes mean-zero-ish
+    continuous values). For count-like input we now run the standard
+    ``sc.pp.normalize_total`` (library-size correction to ``target_sum``)
+    BEFORE ``sc.pp.log1p``, optionally followed by highly-variable-gene
+    selection. The applied steps are recorded in the returned dict so the run
+    manifest is unambiguous about what normalization happened.
+
+    Returns a dict with keys ``applied`` (bool), ``method`` (str),
+    ``target_sum`` (only when normalization ran), ``hvg_applied`` (bool) and
+    ``n_genes_used`` (int).
+    """
+    if already_normalized:
+        norm = {"applied": False, "method": "none"}
+    elif _looks_like_raw_counts(adata.X):
+        # Library-size normalize first, THEN log1p (standard ST pipeline).
+        sc.pp.normalize_total(adata, target_sum=target_sum)
+        sc.pp.log1p(adata)
+        norm = {
+            "applied": True,
+            "method": "normalize_total+log1p",
+            "target_sum": float(target_sum),
+        }
+    else:
+        # Already continuous / non-count-like: do not touch values.
+        norm = {"applied": False, "method": "none"}
+
+    hvg_applied = False
+    if n_hvg and n_hvg > 0 and adata.n_vars > n_hvg:
+        # HVG selection is gated behind --n-hvg (default off). Subset to the
+        # top-dispersion genes so the encoder sees informative columns only.
+        sc.pp.highly_variable_genes(adata, n_top_genes=int(n_hvg))
+        adata._inplace_subset_var(adata.var["highly_variable"].to_numpy())
+        hvg_applied = True
+    norm["hvg_applied"] = hvg_applied
+    norm["n_genes_used"] = int(adata.n_vars)
+    return norm
 
 
 def _build_knn_edges(coords: np.ndarray, k: int) -> np.ndarray:
@@ -174,14 +233,14 @@ def main() -> None:
     adata = sc.read_h5ad(h5ad_path)
     n_obs, n_vars = int(adata.shape[0]), int(adata.shape[1])
 
-    # --- 2. Conditional log1p -------------------------------------------------
-    if args.already_normalized:
-        normalization = {"applied": False, "method": "none"}
-    elif _looks_like_raw_counts(adata.X):
-        sc.pp.log1p(adata)
-        normalization = {"applied": True, "method": "log1p"}
-    else:
-        normalization = {"applied": False, "method": "none"}
+    # --- 2. Normalize (normalize_total -> log1p) + optional HVG --------------
+    normalization = _preprocess(
+        adata,
+        already_normalized=args.already_normalized,
+        n_hvg=args.n_hvg,
+        target_sum=args.target_sum,
+    )
+    n_vars = int(adata.shape[1])  # may shrink if HVG selection ran
 
     # --- 3. Densify + section + edges ----------------------------------------
     X = adata.X
