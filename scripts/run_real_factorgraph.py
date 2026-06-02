@@ -51,8 +51,15 @@ from scipy.spatial import cKDTree
 from factorgraph_st import results_contract
 from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
+    boundary_f1,
+    boundary_precision,
+    boundary_recall,
+    calinski_harabasz,
     morans_i,
+    normalized_mutual_information,
     shared_private_separation,
+    silhouette,
+    weighted_dice,
 )
 from factorgraph_st.model.decoder import fit_transform
 from factorgraph_st.schemas import validate_inputs
@@ -249,6 +256,60 @@ def _compute_gt_ari(
     return (float(ari) if np.isfinite(ari) else None), key, n_labeled
 
 
+def _compute_gt_domain_metrics(
+    adata, out, edges: np.ndarray, gt_obs_key: str | None
+) -> dict[str, float] | None:
+    """Full supervised domain-quality suite vs per-spot GT labels.
+
+    Completes the supervised parity set alongside the ARI of :func:`_compute_gt_ari`:
+    NMI, weighted Dice and boundary precision/recall/F1 compare the recovered
+    ``domain_id`` against the GT labels, while silhouette and Calinski-Harabasz
+    score the *predicted* domains' compactness in the recovered factor embedding
+    (``out.H``). All are computed ONLY when a usable GT obs column is present
+    with at least two distinct non-NA labels; spots whose GT label is NA/blank
+    are dropped from every computation (no fabrication / no cross-donor join),
+    and the spatial graph is restricted to the labeled subset (edges remapped to
+    compact indices) so the boundary set is well defined. Returns ``None`` when
+    no usable GT is found; otherwise a ``str -> float`` dict (non-finite values
+    are coerced to JSON ``null`` by the results contract).
+    """
+    key = _resolve_gt_key(adata, gt_obs_key)
+    if key is None:
+        return None
+    raw = adata.obs[key].astype(str).to_numpy()
+    valid = np.array([s.strip().lower() not in _GT_NA_TOKENS for s in raw], dtype=bool)
+    if int(valid.sum()) < 2:
+        return None
+    _, gt_codes = np.unique(raw[valid], return_inverse=True)
+    if np.unique(gt_codes).size < 2:
+        return None
+    gt_codes = gt_codes.astype(np.int64)
+    pred = np.asarray(out.domain_id)[valid].astype(np.int64)
+
+    # Restrict the spatial graph to labeled spots and remap to compact indices
+    # so boundary spots are defined purely among spots that carry a GT label.
+    n_all = np.asarray(out.domain_id).shape[0]
+    remap = np.full(n_all, -1, dtype=np.int64)
+    remap[np.flatnonzero(valid)] = np.arange(int(valid.sum()), dtype=np.int64)
+    src, dst = edges
+    keep = valid[src] & valid[dst]
+    sub_edges = np.stack([remap[src[keep]], remap[dst[keep]]]).astype(np.int64)
+
+    embedding = np.asarray(out.H, dtype=np.float64)[valid]
+
+    return {
+        "nmi_domain": normalized_mutual_information(gt_codes, pred),
+        "weighted_dice_domain": weighted_dice(gt_codes, pred),
+        "boundary_precision_domain": boundary_precision(gt_codes, pred, sub_edges),
+        "boundary_recall_domain": boundary_recall(gt_codes, pred, sub_edges),
+        "boundary_f1_domain": boundary_f1(gt_codes, pred, sub_edges),
+        # silhouette / Calinski-Harabasz score the predicted clustering's
+        # compactness in the recovered embedding (intrinsic domain quality).
+        "silhouette_domain": silhouette(embedding, pred),
+        "calinski_harabasz_domain": calinski_harabasz(embedding, pred),
+    }
+
+
 def _build_knn_edges(coords: np.ndarray, k: int) -> np.ndarray:
     """Build undirected kNN spatial edges as a ``(2, n_edges)`` int64 COO array.
 
@@ -359,6 +420,12 @@ def main() -> None:
     ari_domain, gt_key_used, n_gt_labeled = _compute_gt_ari(
         adata, out.domain_id, args.gt_obs_key
     )
+    # Full supervised domain-quality suite (NMI / weighted Dice / boundary
+    # P-R-F1 / silhouette / Calinski-Harabasz), behind the SAME GT-label guard
+    # as the ARI above: emitted only when usable per-spot GT labels are present.
+    gt_domain_metrics = _compute_gt_domain_metrics(
+        adata, out, edges, args.gt_obs_key
+    )
 
     # DEGENERACY GUARD: the decoder assigns domains by graph-aware clustering
     # that distributes the domain budget across connected components and runs a
@@ -381,11 +448,16 @@ def main() -> None:
         "private_mean_active_sections": sep["private_mean_active_sections"],
         "n_edges": float(edges.shape[1]),
         "ari_vs_gt_available": float(ari_domain is not None),
+        "domain_metric_suite_available": float(gt_domain_metrics is not None),
     }
     # ``ari_domain`` is recorded ONLY when GT labels were present and evaluable,
     # so a label-less run never emits a misleading ARI value of any kind.
     if ari_domain is not None:
         metrics["ari_domain"] = ari_domain
+    # The supervised domain-quality suite is emitted as a block when GT labels
+    # are present (non-finite entries become JSON null via the results contract).
+    if gt_domain_metrics is not None:
+        metrics.update(gt_domain_metrics)
     metrics.update(_factor_stats(out))
 
     runtime_s = time.perf_counter() - t0
