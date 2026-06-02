@@ -216,6 +216,240 @@ def adjusted_rand_index(labels_true: np.ndarray, labels_pred: np.ndarray) -> flo
     return float((sum_comb - expected) / denom)
 
 
+def normalized_mutual_information(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
+    """Normalized mutual information between two label partitions.
+
+    ``NMI = I(U; V) / mean(H(U), H(V))`` with the arithmetic mean of the two
+    label entropies as the normalizer (the common convention). The result lies
+    in ``[0, 1]``: ``1.0`` for partitions that are identical up to relabeling,
+    ``0.0`` when one partition is independent of the other.
+
+    Degenerate cases mirror :func:`adjusted_rand_index`: ``n < 2`` (no pairs)
+    returns ``float('nan')`` (not evaluable). When *both* partitions collapse
+    to a single cluster the normalizer is zero but the partitions are trivially
+    identical, so ``1.0`` is returned; when only one collapses, mutual
+    information is zero and ``NMI`` is ``0.0``.
+    """
+    if labels_true.shape[0] != labels_pred.shape[0]:
+        raise ValueError("label arrays must have equal length")
+    n = labels_true.size
+    if n < 2:
+        return float("nan")
+    table = _contingency(labels_true, labels_pred)
+    mi = _mutual_information(table, n)
+    h_true = _entropy(table.sum(axis=1), n)
+    h_pred = _entropy(table.sum(axis=0), n)
+    denom = 0.5 * (h_true + h_pred)
+    if denom == 0.0:
+        # Both partitions are a single cluster -> trivially identical.
+        return 1.0
+    return float(min(max(mi / denom, 0.0), 1.0))
+
+
+def silhouette(embedding: np.ndarray, labels: np.ndarray) -> float:
+    """Mean silhouette coefficient of ``labels`` over a Euclidean ``embedding``.
+
+    For each sample, ``s = (b - a) / max(a, b)`` where ``a`` is the mean
+    distance to other samples in its own cluster and ``b`` is the smallest mean
+    distance to samples of any other cluster. Singleton clusters contribute
+    ``s = 0`` (``a`` undefined), matching the standard convention. The score is
+    averaged over all samples and lies in ``[-1, 1]``; higher means denser,
+    better-separated clusters.
+
+    Returns ``float('nan')`` when the number of distinct labels is ``< 2`` or
+    ``>= n`` (silhouette is undefined for a single cluster or all-singletons).
+    """
+    X = np.asarray(embedding, dtype=np.float64)
+    if X.ndim != 2:
+        raise ValueError("embedding must be 2D")
+    labels = np.asarray(labels)
+    n = X.shape[0]
+    if labels.shape[0] != n:
+        raise ValueError("labels length must match embedding rows")
+    classes = np.unique(labels)
+    if classes.size < 2 or classes.size >= n:
+        return float("nan")
+    dist = np.sqrt(np.maximum(_pairwise_sq_dists(X), 0.0))
+    masks = {c: labels == c for c in classes}
+    sizes = {c: int(m.sum()) for c, m in masks.items()}
+    sil = np.zeros(n, dtype=np.float64)
+    for i in range(n):
+        ci = labels[i]
+        a = dist[i, masks[ci]].sum() / (sizes[ci] - 1) if sizes[ci] > 1 else 0.0
+        b = min(dist[i, masks[c]].mean() for c in classes if c != ci)
+        denom = max(a, b)
+        sil[i] = (b - a) / denom if denom > 0 else 0.0
+    return float(sil.mean())
+
+
+def calinski_harabasz(embedding: np.ndarray, labels: np.ndarray) -> float:
+    """Calinski-Harabasz index (variance-ratio criterion) of a clustering.
+
+    ``CH = (tr(B) / (k - 1)) / (tr(W) / (n - k))`` where ``B`` is the
+    between-cluster dispersion (weighted squared distances of cluster centroids
+    to the global mean) and ``W`` is the within-cluster dispersion (squared
+    distances of samples to their centroid). Larger is better.
+
+    Returns ``float('nan')`` when ``k < 2`` or ``k >= n`` (the ratio is
+    undefined), and likewise when the within-cluster dispersion is zero
+    (perfectly coincident points) so no spurious infinity is reported.
+    """
+    X = np.asarray(embedding, dtype=np.float64)
+    if X.ndim != 2:
+        raise ValueError("embedding must be 2D")
+    labels = np.asarray(labels)
+    n = X.shape[0]
+    if labels.shape[0] != n:
+        raise ValueError("labels length must match embedding rows")
+    classes = np.unique(labels)
+    k = classes.size
+    if k < 2 or k >= n:
+        return float("nan")
+    overall = X.mean(axis=0)
+    between = 0.0
+    within = 0.0
+    for c in classes:
+        Xc = X[labels == c]
+        centroid = Xc.mean(axis=0)
+        between += Xc.shape[0] * float(np.sum((centroid - overall) ** 2))
+        within += float(np.sum((Xc - centroid) ** 2))
+    if within == 0.0:
+        return float("nan")
+    return float((between / (k - 1)) * ((n - k) / within))
+
+
+def boundary_precision(labels_true: np.ndarray, labels_pred: np.ndarray, edges: np.ndarray) -> float:
+    """Precision of predicted domain-boundary spots vs ground-truth boundaries.
+
+    A spot is a "boundary" spot when at least one of its spatial neighbors (via
+    the ``edges`` adjacency, a ``(2, n_edges)`` COO array) carries a different
+    domain label. Treating the predicted boundary set as positives,
+    ``precision = |GT_boundary & pred_boundary| / |pred_boundary|``. Returns
+    ``float('nan')`` when no boundary is predicted (precision undefined).
+    """
+    gt = _boundary_mask(labels_true, edges)
+    pred = _boundary_mask(_check_pair(labels_true, labels_pred), edges)
+    denom = int(pred.sum())
+    if denom == 0:
+        return float("nan")
+    return float(int(np.count_nonzero(gt & pred)) / denom)
+
+
+def boundary_recall(labels_true: np.ndarray, labels_pred: np.ndarray, edges: np.ndarray) -> float:
+    """Recall of predicted domain-boundary spots vs ground-truth boundaries.
+
+    With the boundary definition of :func:`boundary_precision`,
+    ``recall = |GT_boundary & pred_boundary| / |GT_boundary|``. Returns
+    ``float('nan')`` when the ground truth has no boundary spots (recall
+    undefined).
+    """
+    gt = _boundary_mask(labels_true, edges)
+    pred = _boundary_mask(_check_pair(labels_true, labels_pred), edges)
+    denom = int(gt.sum())
+    if denom == 0:
+        return float("nan")
+    return float(int(np.count_nonzero(gt & pred)) / denom)
+
+
+def boundary_f1(labels_true: np.ndarray, labels_pred: np.ndarray, edges: np.ndarray) -> float:
+    """F1 of predicted vs ground-truth domain-boundary spots.
+
+    Harmonic mean of :func:`boundary_precision` and :func:`boundary_recall`,
+    computed directly as ``2 * TP / (|pred_boundary| + |GT_boundary|)`` so it is
+    stable when one side is empty. Returns ``float('nan')`` only when neither
+    partition produces any boundary spots (F1 undefined).
+    """
+    gt = _boundary_mask(labels_true, edges)
+    pred = _boundary_mask(_check_pair(labels_true, labels_pred), edges)
+    tp = int(np.count_nonzero(gt & pred))
+    denom = int(gt.sum()) + int(pred.sum())
+    if denom == 0:
+        return float("nan")
+    return float(2.0 * tp / denom)
+
+
+def weighted_dice(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
+    """GT-size-weighted Dice overlap after best-overlap domain matching.
+
+    Each ground-truth domain ``A`` is matched to the predicted domain ``B`` with
+    which it shares the most spots (best-overlap assignment). The per-domain
+    Dice coefficient is ``2 |A & B| / (|A| + |B|)``, and the reported score is
+    the average over GT domains weighted by ``|A|`` (GT domain size). The result
+    lies in ``[0, 1]``; ``1.0`` iff predicted and GT partitions coincide.
+    Returns ``float('nan')`` for empty input.
+    """
+    if labels_true.shape[0] != labels_pred.shape[0]:
+        raise ValueError("label arrays must have equal length")
+    if labels_true.size == 0:
+        return float("nan")
+    table = _contingency(labels_true, labels_pred)
+    gt_sizes = table.sum(axis=1).astype(np.float64)
+    pred_sizes = table.sum(axis=0).astype(np.float64)
+    best_pred = table.argmax(axis=1)
+    inter = table[np.arange(table.shape[0]), best_pred].astype(np.float64)
+    matched = pred_sizes[best_pred]
+    dice = 2.0 * inter / np.maximum(gt_sizes + matched, 1.0)
+    total = float(gt_sizes.sum())
+    if total == 0.0:
+        return float("nan")
+    return float(np.sum(gt_sizes * dice) / total)
+
+
+def _contingency(labels_true: np.ndarray, labels_pred: np.ndarray) -> np.ndarray:
+    """Integer contingency table ``table[i, j] = |true==i & pred==j|`` (#100 style)."""
+    _, true_inv = np.unique(labels_true, return_inverse=True)
+    _, pred_inv = np.unique(labels_pred, return_inverse=True)
+    table = np.zeros((int(true_inv.max()) + 1, int(pred_inv.max()) + 1), dtype=np.int64)
+    np.add.at(table, (true_inv.ravel(), pred_inv.ravel()), 1)
+    return table
+
+
+def _mutual_information(table: np.ndarray, n: int) -> float:
+    """Mutual information (nats) of a contingency ``table`` over ``n`` samples."""
+    nz = table > 0
+    if not nz.any():
+        return 0.0
+    nij = table[nz].astype(np.float64)
+    outer = (table.sum(axis=1, keepdims=True) @ table.sum(axis=0, keepdims=True))[nz].astype(np.float64)
+    mi = float(np.sum((nij / n) * (np.log(nij * n) - np.log(outer))))
+    return max(mi, 0.0)
+
+
+def _entropy(counts: np.ndarray, n: int) -> float:
+    """Shannon entropy (nats) of a label-size distribution given ``n`` samples."""
+    counts = counts[counts > 0].astype(np.float64)
+    if counts.size == 0:
+        return 0.0
+    p = counts / n
+    return float(-np.sum(p * np.log(p)))
+
+
+def _pairwise_sq_dists(X: np.ndarray) -> np.ndarray:
+    """Dense ``(n, n)`` matrix of squared Euclidean distances among rows of ``X``."""
+    sq = np.sum(X * X, axis=1)
+    return sq[:, None] + sq[None, :] - 2.0 * (X @ X.T)
+
+
+def _boundary_mask(labels: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """Boolean per-spot mask: ``True`` if any graph neighbor has a different label."""
+    n = labels.shape[0]
+    mask = np.zeros(n, dtype=bool)
+    if edges.size == 0:
+        return mask
+    src, dst = edges
+    diff = labels[src] != labels[dst]
+    mask[src[diff]] = True
+    mask[dst[diff]] = True
+    return mask
+
+
+def _check_pair(labels_true: np.ndarray, labels_pred: np.ndarray) -> np.ndarray:
+    """Validate matching lengths and return ``labels_pred`` (for boundary helpers)."""
+    if labels_true.shape[0] != labels_pred.shape[0]:
+        raise ValueError("label arrays must have equal length")
+    return labels_pred
+
+
 def _abs_corr_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     if a.shape[0] != b.shape[0]:
         raise ValueError("factor matrices must have the same row count")

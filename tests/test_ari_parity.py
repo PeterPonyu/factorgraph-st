@@ -148,3 +148,66 @@ def test_gt_ari_explicit_missing_key_raises():
     adata = _adata_with_obs({"layer_guess": np.array(["L1", "L2"] * 6)}, n=12)
     with pytest.raises(KeyError):
         mod._compute_gt_ari(adata, np.zeros(12, dtype=int), "does_not_exist")
+
+
+# --- domain-quality metric suite wiring in the real-data runner ---------------
+
+import types  # noqa: E402
+
+
+def _fake_out(domain_id: np.ndarray, embedding: np.ndarray):
+    """Minimal stand-in for the model output (only domain_id + H are used)."""
+    return types.SimpleNamespace(domain_id=domain_id, H=embedding)
+
+
+def _line_edges(n: int) -> np.ndarray:
+    src = np.arange(n - 1, dtype=np.int64)
+    dst = np.arange(1, n, dtype=np.int64)
+    return np.array([np.concatenate([src, dst]), np.concatenate([dst, src])], dtype=np.int64)
+
+
+def test_gt_domain_metrics_skipped_when_absent():
+    """No GT obs column -> the whole suite is skipped (None), never fabricated."""
+    mod = _load_runner()
+    adata = _adata_with_obs({"in_tissue": np.ones(12, dtype=int)})  # Br2719-like
+    out = _fake_out(np.array([0, 1] * 6), np.zeros((12, 2), dtype=np.float64))
+    assert mod._compute_gt_domain_metrics(adata, out, _line_edges(12), None) is None
+
+
+def test_gt_domain_metrics_perfect_prediction():
+    """A perfect (relabel-only) prediction scores NMI=Dice=boundary-F1=1.0."""
+    mod = _load_runner()
+    layers = np.array(["L1"] * 4 + ["L2"] * 4 + ["L3"] * 4)
+    adata = _adata_with_obs({"layer_guess": layers}, n=12)
+    # domain_id is a bijective relabel of the GT partition (contiguous blocks).
+    domain_id = np.array([5] * 4 + [8] * 4 + [2] * 4, dtype=np.int64)
+    # Well-separated per-domain embedding (small jitter so the within-cluster
+    # dispersion is non-zero and Calinski-Harabasz is well defined).
+    centers = np.array([[0.0, 0.0], [40.0, 0.0], [0.0, 40.0]])
+    embedding = np.repeat(centers, 4, axis=0) + np.random.default_rng(0).normal(scale=0.3, size=(12, 2))
+    out = _fake_out(domain_id, embedding)
+
+    suite = mod._compute_gt_domain_metrics(adata, out, _line_edges(12), None)
+    assert suite is not None
+    assert suite["nmi_domain"] == pytest.approx(1.0)
+    assert suite["weighted_dice_domain"] == pytest.approx(1.0)
+    assert suite["boundary_f1_domain"] == pytest.approx(1.0)
+    assert suite["boundary_precision_domain"] == pytest.approx(1.0)
+    assert suite["boundary_recall_domain"] == pytest.approx(1.0)
+    assert np.isfinite(suite["silhouette_domain"])
+    assert np.isfinite(suite["calinski_harabasz_domain"])
+
+
+def test_gt_domain_metrics_drops_na_spots():
+    """NA/blank GT spots are excluded before any metric is computed."""
+    mod = _load_runner()
+    layers = np.array(["L1", "L1", "NA", "L2", "L2", "nan"])
+    adata = _adata_with_obs({"layer_guess": layers}, n=6)
+    domain_id = np.array([3, 3, 9, 7, 7, 1], dtype=np.int64)
+    embedding = np.array([[0.0], [0.1], [9.0], [5.0], [5.1], [1.0]])
+    out = _fake_out(domain_id, embedding)
+    suite = mod._compute_gt_domain_metrics(adata, out, _line_edges(6), None)
+    assert suite is not None
+    # Four labeled spots ([L1,L1,L2,L2]) remain; the relabeling is perfect.
+    assert suite["nmi_domain"] == pytest.approx(1.0)
+    assert suite["weighted_dice_domain"] == pytest.approx(1.0)

@@ -2,24 +2,38 @@
 
 from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
+    boundary_f1,
+    boundary_precision,
+    boundary_recall,
+    calinski_harabasz,
     factor_redundancy,
     held_out_reconstruction_error,
     label_invariant_cluster_coherence,
     matched_factor_correlation,
     morans_i,
+    normalized_mutual_information,
     reconstruction_error,
     section_overlap,
     shared_private_separation,
+    silhouette,
+    weighted_dice,
 )
 
 __all__ = [
     "adjusted_rand_index",
+    "boundary_f1",
+    "boundary_precision",
+    "boundary_recall",
+    "calinski_harabasz",
     "factor_redundancy",
     "held_out_reconstruction_error",
     "label_invariant_cluster_coherence",
     "matched_factor_correlation",
     "morans_i",
+    "normalized_mutual_information",
     "reconstruction_error",
     "section_overlap",
     "shared_private_separation",
+    "silhouette",
+    "weighted_dice",
 ]
