@@ -16,7 +16,7 @@ Synthetic instances have `K_shared` factors active across all sections and `K_pr
 | `K_shared` | 4 | 1-20 | Factors shared across all sections. |
 | `K_private` | 2 | 0-10 | Section-private factors. |
 | `noise_sigma` | 0.5 | 0-2 | Gaussian noise on expression. |
-| `n_domains` | 5 | 1-20 | Requested number of deterministic spatial domain labels; produces up to this count when enough spots are available, independent of `K_shared`. |
+| `n_domains` | 5 | 1-20 | Requested number of deterministic spatial domain labels; produces up to this count when enough spots are available, independent of `K_shared`. Domains are section-aware: each section is partitioned independently along its own random spatial direction, so the spatial layout of domains differs per section while the label set stays shared (bounded by `n_domains`). |
 | `k_nn` | 8 | 0-64 | Directed in-section nearest-neighbor edges per spot; clamped to `section_size - 1`, singleton sections emit no edges. |
 | `seed` | 0 | any int | Deterministic regeneration. |
 
@@ -31,7 +31,7 @@ Synthetic instances have `K_shared` factors active across all sections and `K_pr
 | `truth/W.npy` | Ground-truth gene loadings. |
 | `truth/Z_shared.npy` | Ground-truth shared activations. |
 | `truth/Z_private.npy` | Ground-truth private activations. |
-| `truth/domain_id.npy` | Ground-truth spatial domains. |
+| `truth/domain_id.npy` | Ground-truth spatial domains (section-aware; partitioned per section). |
 
 ## Metrics
 
