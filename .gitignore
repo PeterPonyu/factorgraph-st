@@ -15,8 +15,20 @@ dist/
 baseline_repos/*
 !baseline_repos/README.md
 
-# OMC runtime state (created if tooling is invoked with this repo as cwd)
+# OMC runtime state (created if tooling is invoked with this repo as cwd).
+# Recursive so nested .omc/ folders (e.g. under manuscript/) are also ignored.
 .omc/
+**/.omc/
+
+# OS/editor cruft
+**/.DS_Store
+**/.vscode/
+**/.idea/
+
+# Dataset cache — raw counts + spatial metadata only; cards are tracked
+data/raw/
+data/processed/
+!data/cards/
 
 # Generated outputs
 results/*

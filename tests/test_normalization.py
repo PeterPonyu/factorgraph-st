@@ -31,7 +31,7 @@ def _load_runner():
     return mod
 
 
-def _count_adata(seed: int = 0) -> "ad.AnnData":
+def _count_adata(seed: int = 0) -> ad.AnnData:
     """Synthetic count-like AnnData with strongly varying library sizes."""
     rng = np.random.default_rng(seed)
     n_obs, n_vars = 40, 12
