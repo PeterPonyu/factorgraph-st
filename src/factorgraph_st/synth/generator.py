@@ -126,18 +126,42 @@ def _build_knn_edges_per_section(
 def _assign_spatial_domains(
     coords: np.ndarray, section_id: np.ndarray, n_domains: int, seed: int
 ) -> np.ndarray:
-    """Assign deterministic spatial domains independent of factor count.
+    """Assign deterministic, section-aware spatial domains independent of factor count.
 
-    Domains are quantile bins of a section-aware spatial score. This produces up
-    to ``n_domains`` non-empty labels whenever enough spots are available.
+    Each section is partitioned independently: within a section the spots are
+    projected onto a **section-specific** random direction and split into up to
+    ``n_domains`` contiguous quantile bins. The partition is therefore genuinely
+    section-aware — the spatial layout of the domains differs from section to
+    section — while the label vocabulary stays bounded by ``n_domains`` (every
+    section reuses labels ``0..n_labels-1``), matching the documented
+    "produces up to ``n_domains`` labels" contract.
+
+    The previous implementation added a single global ``0.01 * section_id`` term
+    to one global projection, which was negligible (~8% of the projection
+    spread and a constant per-section offset that almost never reordered spots),
+    so the ground-truth domains were effectively section-independent despite the
+    "section-aware" docstring (#74). Per-section partitioning makes the section
+    dependence real and testable, and yields spatially coherent domains on each
+    section's own kNN graph.
     """
-    if n_domains <= 0 or coords.shape[0] == 0:
-        return np.zeros(coords.shape[0], dtype=np.int64)
-    n_labels = min(int(n_domains), coords.shape[0])
-    rng = np.random.default_rng(seed)
-    weights = rng.normal(size=2)
-    score = coords @ weights + 0.01 * section_id.astype(np.float32)
-    order = np.argsort(score, kind="mergesort")
-    labels = np.empty(coords.shape[0], dtype=np.int64)
-    labels[order] = np.arange(coords.shape[0], dtype=np.int64) * n_labels // coords.shape[0]
+    n_spots = coords.shape[0]
+    if n_domains <= 0 or n_spots == 0:
+        return np.zeros(n_spots, dtype=np.int64)
+    n_labels = min(int(n_domains), n_spots)
+    labels = np.zeros(n_spots, dtype=np.int64)
+    for s in np.unique(section_id):
+        idx = np.where(section_id == s)[0]
+        m = idx.size
+        if m == 0:
+            continue
+        # Section-specific RNG so every section gets a distinct projection
+        # direction; deterministic in ``seed`` and the section index.
+        rng = np.random.default_rng(int(seed) + int(s) + 1)
+        weights = rng.normal(size=coords.shape[1])
+        score = coords[idx] @ weights
+        order = np.argsort(score, kind="mergesort")
+        k = min(n_labels, m)
+        sec_labels = np.empty(m, dtype=np.int64)
+        sec_labels[order] = np.arange(m, dtype=np.int64) * k // m
+        labels[idx] = sec_labels
     return labels
