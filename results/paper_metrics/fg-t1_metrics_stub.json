@@ -1,0 +1,14 @@
+{
+  "asset_id": "FG-T1",
+  "project": "factorgraph-st",
+  "role": "multi-method ARI/NMI comparison table — domain clustering metrics (ARI, NMI, Boundary F1, Silhouette, Calinski-Harabasz) across methods per dataset section",
+  "readiness_status": "planned",
+  "source_metric_reference": "planned",
+  "source_script_reference": "planned",
+  "source_exists": false,
+  "metric_source_exists": false,
+  "artifact_exists": false,
+  "supports_safe_prose": false,
+  "paper_claim_ready": false,
+  "notes": "Stub metric record for reproducibility tracking; not paper-claim-ready until claim ID, benchmark metric artifact, data card, and rendered table are validated. Covers DLPFC Maynard 12-section ARI/NMI/Boundary-F1/Silhouette/Calinski-Harabasz metrics; awaits learned-model rebuild (#181)."
+}
