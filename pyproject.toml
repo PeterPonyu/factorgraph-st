@@ -36,6 +36,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# src/ is on sys.path for collection so `pytest` works out-of-the-box without
+# requiring `PYTHONPATH=src` or an editable install (see issue #289).
+pythonpath = ["src"]
 addopts = "-q"
 
 [tool.ruff]
