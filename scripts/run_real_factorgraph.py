@@ -3,9 +3,14 @@
 
 Loads a real ``.h5ad`` spatial-transcriptomics matrix, builds a single-section
 kNN spatial graph, runs the FactorGraph-ST MVP ``fit_transform``, computes
-INTRINSIC (unsupervised) metrics only, and emits the uniform computational
-results contract (``metrics.json`` + ``run_metadata.json`` + ``outputs/``) via
-the vendored :mod:`factorgraph_st.results_contract`.
+INTRINSIC (unsupervised) metrics and -- WHEN per-spot ground-truth domain
+labels are present in ``adata.obs`` (e.g. the Maynard 2021 spatialLIBD DLPFC
+``layer_guess`` / ``ground_truth_domain`` column) -- the supervised Adjusted
+Rand Index of the recovered domains vs those labels (#179). ARI is computed
+only when a usable GT column is found; it is silently skipped otherwise, and
+labels are never fabricated or joined across donors. Emits the uniform
+computational results contract (``metrics.json`` + ``run_metadata.json`` +
+``outputs/``) via the vendored :mod:`factorgraph_st.results_contract`.
 
 SCIENTIFIC-HONESTY NOTE (see consensus plan §4.3): the FactorGraph-ST "model"
 is NOT a learned factor model. The encoder is a fixed random Gaussian
@@ -44,7 +49,11 @@ import scipy.sparse as sp
 from scipy.spatial import cKDTree
 
 from factorgraph_st import results_contract
-from factorgraph_st.eval.metrics import morans_i, shared_private_separation
+from factorgraph_st.eval.metrics import (
+    adjusted_rand_index,
+    morans_i,
+    shared_private_separation,
+)
 from factorgraph_st.model.decoder import fit_transform
 from factorgraph_st.schemas import validate_inputs
 
@@ -108,6 +117,16 @@ def _parse_args() -> argparse.Namespace:
             "after normalization. Default 0 = keep all genes."
         ),
     )
+    parser.add_argument(
+        "--gt-obs-key",
+        type=str,
+        default=None,
+        help=(
+            "obs column holding per-spot ground-truth domain labels for the "
+            "supervised ARI (#179). Default None = auto-detect "
+            f"({', '.join(_GT_OBS_KEY_CANDIDATES)}); ARI is skipped if none present."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -163,6 +182,71 @@ def _preprocess(adata, *, already_normalized: bool, n_hvg: int, target_sum: floa
     norm["hvg_applied"] = hvg_applied
     norm["n_genes_used"] = int(adata.n_vars)
     return norm
+
+
+#: Candidate ``adata.obs`` columns that may carry per-spot ground-truth spatial
+#: domain labels, in priority order. The Maynard 2021 spatialLIBD DLPFC prep
+#: writes ``ground_truth_domain`` (from the spatialLIBD ``layer_guess_*`` field);
+#: ``layer_guess`` is the canonical upstream name. Auto-detection binds to the
+#: first present column unless ``--gt-obs-key`` is given explicitly.
+_GT_OBS_KEY_CANDIDATES = (
+    "layer_guess",
+    "layer_guess_reordered_short",
+    "ground_truth_domain",
+    "ground_truth",
+    "spatial_domain",
+)
+
+#: Tokens treated as "no label" and excluded from ARI on BOTH partitions.
+_GT_NA_TOKENS = frozenset({"", "na", "nan", "none", "unknown", "unlabeled", "unlabelled"})
+
+
+def _resolve_gt_key(adata, gt_obs_key: str | None) -> str | None:
+    """Return the obs column holding GT domain labels, or ``None`` if absent.
+
+    An explicit ``--gt-obs-key`` that is missing fails loudly (no silent
+    fallback); auto-detection scans ``_GT_OBS_KEY_CANDIDATES`` in order.
+    """
+    if gt_obs_key:
+        if gt_obs_key not in adata.obs.columns:
+            raise KeyError(
+                f"--gt-obs-key={gt_obs_key!r} not found in adata.obs "
+                f"(available: {list(adata.obs.columns)})"
+            )
+        return gt_obs_key
+    for key in _GT_OBS_KEY_CANDIDATES:
+        if key in adata.obs.columns:
+            return key
+    return None
+
+
+def _compute_gt_ari(
+    adata, domain_id: np.ndarray, gt_obs_key: str | None
+) -> tuple[float | None, str | None, int]:
+    """Adjusted Rand Index of ``domain_id`` vs per-spot GT labels (#179).
+
+    Guard: ARI is computed ONLY when a usable GT obs column is present with at
+    least two distinct non-NA labels across at least two spots. Spots whose GT
+    label is NA/blank are dropped from BOTH partitions so we never fabricate
+    labels or join across donors. Returns ``(ari, key_used, n_labeled)``; the
+    ARI is ``None`` (skipped) when no usable GT is found.
+    """
+    key = _resolve_gt_key(adata, gt_obs_key)
+    if key is None:
+        return None, None, 0
+    raw = adata.obs[key].astype(str).to_numpy()
+    valid = np.array([s.strip().lower() not in _GT_NA_TOKENS for s in raw], dtype=bool)
+    n_labeled = int(valid.sum())
+    if n_labeled < 2:
+        return None, key, n_labeled
+    gt = raw[valid]
+    pred = np.asarray(domain_id)[valid].astype(np.int64)
+    _, gt_codes = np.unique(gt, return_inverse=True)
+    if np.unique(gt_codes).size < 2:
+        # Only one GT class present among labeled spots -> ARI not evaluable.
+        return None, key, n_labeled
+    ari = adjusted_rand_index(gt_codes.astype(np.int64), pred)
+    return (float(ari) if np.isfinite(ari) else None), key, n_labeled
 
 
 def _build_knn_edges(coords: np.ndarray, k: int) -> np.ndarray:
@@ -263,10 +347,18 @@ def main() -> None:
         seed=args.seed,
     )
 
-    # --- 5. Intrinsic metrics (NO ARI / GT) ----------------------------------
+    # --- 5. Intrinsic metrics (+ supervised ARI iff GT labels present, #179) -
     morans_real = morans_i(out.domain_id.astype(np.float64), edges)
     morans_null = _morans_null(out.domain_id, edges, args.n_null_shuffles, args.seed)
     sep = shared_private_separation(out.Z_shared, out.Z_private, section_id)
+
+    # Supervised domain ARI vs per-spot GT labels (e.g. Maynard DLPFC layer
+    # labels). Computed ONLY when a usable GT obs column is present; skipped
+    # (no fabrication / no wrong-donor join) for label-less datasets like the
+    # active Br2719 section, whose obs carries no domain annotation.
+    ari_domain, gt_key_used, n_gt_labeled = _compute_gt_ari(
+        adata, out.domain_id, args.gt_obs_key
+    )
 
     # DEGENERACY GUARD: the decoder assigns domains by graph-aware clustering
     # that distributes the domain budget across connected components and runs a
@@ -288,7 +380,12 @@ def main() -> None:
         "shared_mean_active_sections": sep["shared_mean_active_sections"],
         "private_mean_active_sections": sep["private_mean_active_sections"],
         "n_edges": float(edges.shape[1]),
+        "ari_vs_gt_available": float(ari_domain is not None),
     }
+    # ``ari_domain`` is recorded ONLY when GT labels were present and evaluable,
+    # so a label-less run never emits a misleading ARI value of any kind.
+    if ari_domain is not None:
+        metrics["ari_domain"] = ari_domain
     metrics.update(_factor_stats(out))
 
     runtime_s = time.perf_counter() - t0
@@ -353,6 +450,18 @@ def main() -> None:
         "reproducibility_level": "seeded",
         "normalization": normalization,
         "interpretability": interpretability,
+        "ground_truth_ari": {
+            "available": ari_domain is not None,
+            "obs_key_used": gt_key_used,
+            "n_labeled_spots": n_gt_labeled,
+            "ari_domain": ari_domain,
+            "note": (
+                "Supervised ARI of recovered domains vs per-spot GT labels (#179). "
+                "Computed only when a usable GT obs column is present; NA/blank "
+                "spots are dropped from both partitions. No labels are fabricated "
+                "and no cross-donor join is performed."
+            ),
+        },
         "notes": (
             "Single-section run (section_id all zeros); shared_private_separation "
             "degenerates (single_section=True). FactorGraph-ST MVP is a fixed "
@@ -375,6 +484,11 @@ def main() -> None:
     print(f"Wrote outputs:      {factors_npz}")
     print(f"morans_i_domain={morans_real:.6f} null={morans_null:.6f} "
           f"delta={morans_real - morans_null:.6f} runtime_s={runtime_s:.2f}")
+    if ari_domain is not None:
+        print(f"ari_domain={ari_domain:.6f} (vs obs[{gt_key_used!r}], "
+              f"{n_gt_labeled} labeled spots)")
+    else:
+        print("ari_domain=SKIPPED (no usable ground-truth domain labels in obs)")
 
 
 if __name__ == "__main__":
