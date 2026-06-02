@@ -49,6 +49,7 @@ import scipy.sparse as sp
 from scipy.spatial import cKDTree
 
 from factorgraph_st import results_contract
+from factorgraph_st.baselines import spatial_smooth_domains
 from factorgraph_st.eval.metrics import (
     adjusted_rand_index,
     boundary_f1,
@@ -137,14 +138,17 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        choices=("projection", "gnmf"),
+        choices=("projection", "gnmf", "spatial_smooth"),
         default="projection",
         help=(
-            "Factor model. 'projection' (default) = the existing fixed random "
-            "Gaussian projection encoder + NNLS loadings + [H|coords] domains "
-            "(unchanged). 'gnmf' = the OPT-IN trained graph-regularized NMF "
+            "Factor model / baseline. 'projection' (default) = the existing fixed "
+            "random Gaussian projection encoder + NNLS loadings + [H|coords] "
+            "domains (unchanged). 'gnmf' = the OPT-IN trained graph-regularized NMF "
             "(model/learned.py): spatial coherence is learned via the graph "
-            "Laplacian and domains are clustered on H alone."
+            "Laplacian and domains are clustered on H alone. 'spatial_smooth' = the "
+            "OPT-IN clean-room comparison BASELINE (baselines.py): neighbor-average "
+            "the expression over the kNN graph, reduce by PCA, then k-means into "
+            "domains. It emits only the domain-metric block (no factor model)."
         ),
     )
     parser.add_argument(
@@ -164,6 +168,27 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=1e-4,
         help="GNMF relative objective-change early-stop tolerance (only when --model gnmf).",
+    )
+    parser.add_argument(
+        "--smooth-alpha",
+        type=float,
+        default=0.5,
+        help="Graph-smoothing blend weight per hop in [0,1] (only when --model spatial_smooth).",
+    )
+    parser.add_argument(
+        "--smooth-hops",
+        type=int,
+        default=2,
+        help=(
+            "Number of graph-smoothing hops; 0 = plain PCA (only when "
+            "--model spatial_smooth)."
+        ),
+    )
+    parser.add_argument(
+        "--smooth-n-components",
+        type=int,
+        default=16,
+        help="PCA dimensionality before k-means (only when --model spatial_smooth).",
     )
     return parser.parse_args()
 
@@ -288,21 +313,22 @@ def _compute_gt_ari(
 
 
 def _compute_gt_domain_metrics(
-    adata, out, edges: np.ndarray, gt_obs_key: str | None
+    adata, domain_id: np.ndarray, embedding: np.ndarray, edges: np.ndarray, gt_obs_key: str | None
 ) -> dict[str, float] | None:
     """Full supervised domain-quality suite vs per-spot GT labels.
 
     Completes the supervised parity set alongside the ARI of :func:`_compute_gt_ari`:
     NMI, weighted Dice and boundary precision/recall/F1 compare the recovered
     ``domain_id`` against the GT labels, while silhouette and Calinski-Harabasz
-    score the *predicted* domains' compactness in the recovered factor embedding
-    (``out.H``). All are computed ONLY when a usable GT obs column is present
-    with at least two distinct non-NA labels; spots whose GT label is NA/blank
-    are dropped from every computation (no fabrication / no cross-donor join),
-    and the spatial graph is restricted to the labeled subset (edges remapped to
-    compact indices) so the boundary set is well defined. Returns ``None`` when
-    no usable GT is found; otherwise a ``str -> float`` dict (non-finite values
-    are coerced to JSON ``null`` by the results contract).
+    score the *predicted* domains' compactness in the recovered ``embedding``
+    (the factor scores ``H`` for the model paths, or the baseline's PCA scores).
+    All are computed ONLY when a usable GT obs column is present with at least
+    two distinct non-NA labels; spots whose GT label is NA/blank are dropped from
+    every computation (no fabrication / no cross-donor join), and the spatial
+    graph is restricted to the labeled subset (edges remapped to compact indices)
+    so the boundary set is well defined. Returns ``None`` when no usable GT is
+    found; otherwise a ``str -> float`` dict (non-finite values are coerced to
+    JSON ``null`` by the results contract).
     """
     key = _resolve_gt_key(adata, gt_obs_key)
     if key is None:
@@ -315,18 +341,18 @@ def _compute_gt_domain_metrics(
     if np.unique(gt_codes).size < 2:
         return None
     gt_codes = gt_codes.astype(np.int64)
-    pred = np.asarray(out.domain_id)[valid].astype(np.int64)
+    pred = np.asarray(domain_id)[valid].astype(np.int64)
 
     # Restrict the spatial graph to labeled spots and remap to compact indices
     # so boundary spots are defined purely among spots that carry a GT label.
-    n_all = np.asarray(out.domain_id).shape[0]
+    n_all = np.asarray(domain_id).shape[0]
     remap = np.full(n_all, -1, dtype=np.int64)
     remap[np.flatnonzero(valid)] = np.arange(int(valid.sum()), dtype=np.int64)
     src, dst = edges
     keep = valid[src] & valid[dst]
     sub_edges = np.stack([remap[src[keep]], remap[dst[keep]]]).astype(np.int64)
 
-    embedding = np.asarray(out.H, dtype=np.float64)[valid]
+    embedding = np.asarray(embedding, dtype=np.float64)[valid]
 
     return {
         "nmi_domain": normalized_mutual_information(gt_codes, pred),
@@ -428,7 +454,28 @@ def main() -> None:
     # --- 4. Validate + fit ----------------------------------------------------
     validate_inputs(X, coords, section_id, edges)
     gnmf_result = None
-    if args.model == "gnmf":
+    baseline_out = None
+    if args.model == "spatial_smooth":
+        # OPT-IN clean-room comparison BASELINE (baselines.py). NOT a factor
+        # model: it neighbor-averages the (normalized) expression over the kNN
+        # graph, reduces by PCA, then k-means into domains. ``out`` is left None
+        # so the factor-model-specific blocks (shared/private separation, factor
+        # stats, factors.npz) are skipped; only the domain-metric block is
+        # emitted, scored by the SAME eval suite and behind the SAME GT guard as
+        # the models, so the comparison is apples-to-apples.
+        baseline_out = spatial_smooth_domains(
+            X,
+            edges,
+            n_domains=args.n_domains,
+            n_components=args.smooth_n_components,
+            alpha=args.smooth_alpha,
+            n_hops=args.smooth_hops,
+            seed=args.seed,
+        )
+        out = None
+        domain_id = baseline_out.domain_id
+        embedding = baseline_out.embedding
+    elif args.model == "gnmf":
         # OPT-IN trained model: graph-regularized NMF (numpy-only). Spatial
         # coherence is LEARNED via the Laplacian regularizer on `edges`, not by
         # baking coords into the features, and domains are clustered on the
@@ -445,6 +492,8 @@ def main() -> None:
             tol=args.gnmf_tol,
             seed=args.seed,
         )
+        domain_id = out.domain_id
+        embedding = out.H
     else:
         out = fit_transform(
             X,
@@ -457,24 +506,25 @@ def main() -> None:
             n_domains=args.n_domains,
             seed=args.seed,
         )
+        domain_id = out.domain_id
+        embedding = out.H
 
     # --- 5. Intrinsic metrics (+ supervised ARI iff GT labels present, #179) -
-    morans_real = morans_i(out.domain_id.astype(np.float64), edges)
-    morans_null = _morans_null(out.domain_id, edges, args.n_null_shuffles, args.seed)
-    sep = shared_private_separation(out.Z_shared, out.Z_private, section_id)
+    morans_real = morans_i(domain_id.astype(np.float64), edges)
+    morans_null = _morans_null(domain_id, edges, args.n_null_shuffles, args.seed)
 
     # Supervised domain ARI vs per-spot GT labels (e.g. Maynard DLPFC layer
     # labels). Computed ONLY when a usable GT obs column is present; skipped
     # (no fabrication / no wrong-donor join) for label-less datasets like the
     # active Br2719 section, whose obs carries no domain annotation.
     ari_domain, gt_key_used, n_gt_labeled = _compute_gt_ari(
-        adata, out.domain_id, args.gt_obs_key
+        adata, domain_id, args.gt_obs_key
     )
     # Full supervised domain-quality suite (NMI / weighted Dice / boundary
     # P-R-F1 / silhouette / Calinski-Harabasz), behind the SAME GT-label guard
     # as the ARI above: emitted only when usable per-spot GT labels are present.
     gt_domain_metrics = _compute_gt_domain_metrics(
-        adata, out, edges, args.gt_obs_key
+        adata, domain_id, embedding, edges, args.gt_obs_key
     )
 
     # DEGENERACY GUARD: the decoder assigns domains by graph-aware clustering
@@ -486,20 +536,37 @@ def main() -> None:
     # guard as a safety check: if some pathological input still yields a single
     # domain, every domain-derived metric (Moran's I) is trivially 0, so we
     # detect and record it explicitly rather than report the zeros as signal.
-    n_domains_found = int(np.unique(out.domain_id).size)
+    n_domains_found = int(np.unique(domain_id).size)
     domain_degenerate = n_domains_found <= 1
 
-    metrics: dict[str, float] = {
-        "morans_i_domain": morans_real,
-        "morans_i_domain_null": morans_null,
-        "morans_i_domain_delta": morans_real - morans_null,
-        "domain_clustering_degenerate": float(domain_degenerate),
-        "shared_mean_active_sections": sep["shared_mean_active_sections"],
-        "private_mean_active_sections": sep["private_mean_active_sections"],
-        "n_edges": float(edges.shape[1]),
-        "ari_vs_gt_available": float(ari_domain is not None),
-        "domain_metric_suite_available": float(gt_domain_metrics is not None),
-    }
+    if out is not None:
+        # Factor-model paths (projection / gnmf): emit the shared/private factor
+        # separation alongside the domain block. Built as the original literal so
+        # the projection/gnmf metric set stays byte-for-byte unchanged.
+        sep = shared_private_separation(out.Z_shared, out.Z_private, section_id)
+        metrics: dict[str, float] = {
+            "morans_i_domain": morans_real,
+            "morans_i_domain_null": morans_null,
+            "morans_i_domain_delta": morans_real - morans_null,
+            "domain_clustering_degenerate": float(domain_degenerate),
+            "shared_mean_active_sections": sep["shared_mean_active_sections"],
+            "private_mean_active_sections": sep["private_mean_active_sections"],
+            "n_edges": float(edges.shape[1]),
+            "ari_vs_gt_available": float(ari_domain is not None),
+            "domain_metric_suite_available": float(gt_domain_metrics is not None),
+        }
+    else:
+        # spatial_smooth BASELINE: domain-metric block only (no factor structure,
+        # so no shared/private separation or factor stats are meaningful).
+        metrics = {
+            "morans_i_domain": morans_real,
+            "morans_i_domain_null": morans_null,
+            "morans_i_domain_delta": morans_real - morans_null,
+            "domain_clustering_degenerate": float(domain_degenerate),
+            "n_edges": float(edges.shape[1]),
+            "ari_vs_gt_available": float(ari_domain is not None),
+            "domain_metric_suite_available": float(gt_domain_metrics is not None),
+        }
     # ``ari_domain`` is recorded ONLY when GT labels were present and evaluable,
     # so a label-less run never emits a misleading ARI value of any kind.
     if ari_domain is not None:
@@ -508,7 +575,9 @@ def main() -> None:
     # are present (non-finite entries become JSON null via the results contract).
     if gt_domain_metrics is not None:
         metrics.update(gt_domain_metrics)
-    metrics.update(_factor_stats(out))
+    # Factor stats are factor-model-only (skipped for the baseline).
+    if out is not None:
+        metrics.update(_factor_stats(out))
     # Learning evidence is emitted ONLY on the trained path so the projection
     # run's metrics stay byte-for-byte unchanged.
     if gnmf_result is not None:
@@ -526,15 +595,27 @@ def main() -> None:
         results_root = Path(__file__).resolve().parents[1] / "results"
     outputs_dir = results_root / "factorgraph-st" / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
-    factors_npz = outputs_dir / "factors.npz"
-    np.savez_compressed(
-        factors_npz,
-        H=out.H,
-        W=out.W,
-        Z_shared=out.Z_shared,
-        Z_private=out.Z_private,
-        domain_id=out.domain_id,
-    )
+    if out is not None:
+        output_npz = outputs_dir / "factors.npz"
+        np.savez_compressed(
+            output_npz,
+            H=out.H,
+            W=out.W,
+            Z_shared=out.Z_shared,
+            Z_private=out.Z_private,
+            domain_id=out.domain_id,
+        )
+        outputs_payload = {"factors": str(output_npz)}
+    else:
+        # Baseline: persist the PCA embedding + domain labels (no factor matrices).
+        assert baseline_out is not None  # out is None <=> spatial_smooth baseline
+        output_npz = outputs_dir / "baseline_spatial_smooth.npz"
+        np.savez_compressed(
+            output_npz,
+            embedding=baseline_out.embedding,
+            domain_id=baseline_out.domain_id,
+        )
+        outputs_payload = {"baseline_spatial_smooth": str(output_npz)}
 
     # --- 7. Emit contract -----------------------------------------------------
     interpretability = {
@@ -603,6 +684,45 @@ def main() -> None:
                 else "domain clustering produced multiple domains"
             ),
         }
+    elif args.model == "spatial_smooth":
+        # OPT-IN clean-room comparison BASELINE: replace the factor-model
+        # description with the honest graph-smoothing pipeline description.
+        interpretability = {
+            "model_is_learned": False,
+            "encoder": (
+                "clean-room spatial-smoothing baseline (baselines.py): neighbor-average "
+                "the normalized expression over the symmetrized kNN graph for "
+                f"n_hops={args.smooth_hops} blended steps (alpha={args.smooth_alpha}), "
+                "no training/backprop"
+            ),
+            "factor_basis": (
+                f"numpy PCA (SVD) of the smoothed expression to {args.smooth_n_components} "
+                "components; no nonnegative factor model"
+            ),
+            "loadings": "not applicable (no factor model; baseline has no gene loadings)",
+            "domain_assignment": (
+                "k-means on the PCA embedding of the graph-smoothed expression "
+                "(baselines.py:spatial_smooth_domains); coordinates are NOT a clustering "
+                "input -- the only spatial signal is the neighbor averaging"
+            ),
+            "caveat": (
+                "comparison baseline only: graph smoothing injects spatial coherence via "
+                "neighbor averaging, so morans_i_domain reflects that smoothing prior and "
+                "should be read as the delta over morans_i_domain_null. With n_hops=0 this "
+                "reduces to a plain PCA + k-means ablation (no spatial smoothing)."
+            ),
+            "smooth_alpha": float(args.smooth_alpha),
+            "smooth_hops": int(args.smooth_hops),
+            "smooth_n_components": int(args.smooth_n_components),
+            "domain_clustering_degenerate": bool(domain_degenerate),
+            "domain_count_found": n_domains_found,
+            "domain_degeneracy_reason": (
+                "baseline clustering collapsed to a single label; with one domain "
+                "morans_i_domain is trivially 0. Inspect n_domains / the kNN graph."
+                if domain_degenerate
+                else "baseline clustering produced multiple domains"
+            ),
+        }
     run_metadata = {
         "dataset_paths": [str(h5ad_path)],
         "n_obs": n_obs,
@@ -647,25 +767,41 @@ def main() -> None:
             "Single-section run (section_id all zeros); shared_private_separation "
             "degenerates (single_section=True)."
         )
+    elif args.model == "spatial_smooth":
+        # Override only on the baseline path; the projection run_metadata above is
+        # left byte-for-byte unchanged.
+        run_metadata["model"] = "spatial_smooth"
+        run_metadata["notes"] = (
+            "OPT-IN clean-room comparison BASELINE (baselines.py): graph-smoothing "
+            f"(alpha={args.smooth_alpha}, n_hops={args.smooth_hops}) of the normalized "
+            f"expression -> PCA ({args.smooth_n_components} components) -> k-means "
+            "domains. Not a factor model; only the domain-metric block is emitted "
+            "(no shared/private separation or factor stats), scored by the SAME eval "
+            "suite as the models for an apples-to-apples comparison. n_hops=0 reduces "
+            "to a plain PCA + k-means ablation."
+        )
 
     paths = results_contract.write_results(
         project="factorgraph-st",
         dataset_card_id=results_contract.dataset_card_id([str(h5ad_path)]),
         metrics=metrics,
-        outputs={"factors": str(factors_npz)},
+        outputs=outputs_payload,
         run_metadata=run_metadata,
         results_dir=results_root,
     )
 
     print(f"Wrote metrics:      {paths['metrics']}")
     print(f"Wrote run_metadata: {paths['run_metadata']}")
-    print(f"Wrote outputs:      {factors_npz}")
+    print(f"Wrote outputs:      {output_npz}")
     print(f"morans_i_domain={morans_real:.6f} null={morans_null:.6f} "
           f"delta={morans_real - morans_null:.6f} runtime_s={runtime_s:.2f}")
     if gnmf_result is not None:
         print(f"model=gnmf lam={args.gnmf_lam} objective "
               f"{gnmf_result.objective[0]:.4f} -> {gnmf_result.objective[-1]:.4f} "
               f"over {gnmf_result.n_iter_run} iters")
+    if baseline_out is not None:
+        print(f"model=spatial_smooth alpha={args.smooth_alpha} hops={args.smooth_hops} "
+              f"n_components={args.smooth_n_components} domains_found={n_domains_found}")
     if ari_domain is not None:
         print(f"ari_domain={ari_domain:.6f} (vs obs[{gt_key_used!r}], "
               f"{n_gt_labeled} labeled spots)")
