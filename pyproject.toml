@@ -24,6 +24,11 @@ dev = ["ruff>=0.5", "mypy>=1.8"]
 # `fit_transform(..., encoder="gnn")`. Selecting the GNN encoder without this
 # extra raises a clear ImportError.
 model = ["torch>=2.0"]
+# viz: non-interactive factor-embedding plots (src/factorgraph_st/viz.py, issue
+# #200). matplotlib is NOT a core dependency — the runtime package stays
+# numpy-only. Install with `pip install -e '.[viz]'` to render PNGs. UMAP/scanpy
+# are further-optional and auto-detected at call time (numpy-SVD PCA fallback).
+viz = ["matplotlib>=3.6"]
 # real-data: heavyweight deps used ONLY by the scripts/run_real_factorgraph.py
 # and scripts/compute_further_factorgraph_metrics.py real-data results path
 # (scanpy/anndata h5ad loading, scipy kNN). The runtime package itself stays
@@ -64,6 +69,13 @@ select = ["E", "W", "F", "I", "UP", "B"]
 # (e.g. UP035 collections.abc, UP045 `X | None`). It cannot be modified here
 # without breaking the SHA-256 lock, so its pyupgrade findings are ignored.
 "src/factorgraph_st/results_contract.py" = ["UP"]
+# viz.py must call matplotlib.use("Agg") BEFORE importing pyplot, so the pyplot
+# import cannot sit at the top of the module (E402) and the import block cannot
+# be auto-sorted (I001). The ordering is load-bearing for headless rendering.
+"src/factorgraph_st/viz.py" = ["E402", "I001"]
+# test_viz.py uses pytest.importorskip("matplotlib") before importing the viz
+# module so the suite is collectable without the optional [viz] extra (E402).
+"tests/test_viz.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.10"
