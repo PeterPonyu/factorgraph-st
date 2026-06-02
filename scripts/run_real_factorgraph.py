@@ -22,8 +22,9 @@ This runner pairs every reported ``morans_i_domain`` with a permutation-shuffled
 null (``morans_i_domain_null``) and records a mandatory interpretability block so
 the value is only ever interpreted as a delta over chance.
 
-This script lives entirely in the runner: densify, conditional log1p, and the
-kNN edge build are runner-local; no model source is touched.
+This script lives entirely in the runner: densify, normalization
+(``normalize_total`` -> ``log1p`` on count-like input, optional HVG selection),
+and the kNN edge build are runner-local; no model source is touched.
 
 Usage (under the project conda env)::
 
@@ -90,7 +91,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--already-normalized",
         action="store_true",
-        help="Skip the conditional log1p; assume X is already normalized.",
+        help="Skip normalize_total + log1p; assume X is already normalized.",
+    )
+    parser.add_argument(
+        "--target-sum",
+        type=float,
+        default=1e4,
+        help="Library-size target for sc.pp.normalize_total (default 1e4).",
+    )
+    parser.add_argument(
+        "--n-hvg",
+        type=int,
+        default=0,
+        help=(
+            "If > 0, select this many highly variable genes (and subset X) "
+            "after normalization. Default 0 = keep all genes."
+        ),
     )
     return parser.parse_args()
 
@@ -104,6 +120,49 @@ def _looks_like_raw_counts(X) -> bool:
     sample = X[: min(X.shape[0], 100)]
     sample = sample.toarray() if sp.issparse(sample) else np.asarray(sample)
     return bool(np.allclose(sample, np.round(sample)))
+
+
+def _preprocess(adata, *, already_normalized: bool, n_hvg: int, target_sum: float = 1e4) -> dict:
+    """Apply the standard ST preprocessing in place and return a manifest dict.
+
+    Closes #197. The previous path applied only a heuristic ``log1p`` and never
+    library-size normalized, so per-spot total-count variance dominated the
+    encoder input (the encoder column-mean-centers but assumes mean-zero-ish
+    continuous values). For count-like input we now run the standard
+    ``sc.pp.normalize_total`` (library-size correction to ``target_sum``)
+    BEFORE ``sc.pp.log1p``, optionally followed by highly-variable-gene
+    selection. The applied steps are recorded in the returned dict so the run
+    manifest is unambiguous about what normalization happened.
+
+    Returns a dict with keys ``applied`` (bool), ``method`` (str),
+    ``target_sum`` (only when normalization ran), ``hvg_applied`` (bool) and
+    ``n_genes_used`` (int).
+    """
+    if already_normalized:
+        norm = {"applied": False, "method": "none"}
+    elif _looks_like_raw_counts(adata.X):
+        # Library-size normalize first, THEN log1p (standard ST pipeline).
+        sc.pp.normalize_total(adata, target_sum=target_sum)
+        sc.pp.log1p(adata)
+        norm = {
+            "applied": True,
+            "method": "normalize_total+log1p",
+            "target_sum": float(target_sum),
+        }
+    else:
+        # Already continuous / non-count-like: do not touch values.
+        norm = {"applied": False, "method": "none"}
+
+    hvg_applied = False
+    if n_hvg and n_hvg > 0 and adata.n_vars > n_hvg:
+        # HVG selection is gated behind --n-hvg (default off). Subset to the
+        # top-dispersion genes so the encoder sees informative columns only.
+        sc.pp.highly_variable_genes(adata, n_top_genes=int(n_hvg))
+        adata._inplace_subset_var(adata.var["highly_variable"].to_numpy())
+        hvg_applied = True
+    norm["hvg_applied"] = hvg_applied
+    norm["n_genes_used"] = int(adata.n_vars)
+    return norm
 
 
 def _build_knn_edges(coords: np.ndarray, k: int) -> np.ndarray:
@@ -174,14 +233,14 @@ def main() -> None:
     adata = sc.read_h5ad(h5ad_path)
     n_obs, n_vars = int(adata.shape[0]), int(adata.shape[1])
 
-    # --- 2. Conditional log1p -------------------------------------------------
-    if args.already_normalized:
-        normalization = {"applied": False, "method": "none"}
-    elif _looks_like_raw_counts(adata.X):
-        sc.pp.log1p(adata)
-        normalization = {"applied": True, "method": "log1p"}
-    else:
-        normalization = {"applied": False, "method": "none"}
+    # --- 2. Normalize (normalize_total -> log1p) + optional HVG --------------
+    normalization = _preprocess(
+        adata,
+        already_normalized=args.already_normalized,
+        n_hvg=args.n_hvg,
+        target_sum=args.target_sum,
+    )
+    n_vars = int(adata.shape[1])  # may shrink if HVG selection ran
 
     # --- 3. Densify + section + edges ----------------------------------------
     X = adata.X
@@ -209,13 +268,15 @@ def main() -> None:
     morans_null = _morans_null(out.domain_id, edges, args.n_null_shuffles, args.seed)
     sep = shared_private_separation(out.Z_shared, out.Z_private, section_id)
 
-    # DEGENERACY GUARD: main's decoder assigns domains by graph-aware clustering
-    # that collapses each connected component of ``edges`` to a single label
-    # (decoder.py:_cluster_components). A single-section kNN graph over one
-    # contiguous slide is fully connected (one component), so ``domain_id``
-    # degenerates to a SINGLE domain regardless of ``n_domains`` -- and every
-    # domain-derived metric (Moran's I) is trivially 0. We detect and record this
-    # explicitly so the zeros are never mistaken for a computed spatial signal.
+    # DEGENERACY GUARD: the decoder assigns domains by graph-aware clustering
+    # that distributes the domain budget across connected components and runs a
+    # per-spot k-means WITHIN each component (decoder.py:_cluster_components).
+    # A single-section kNN graph over one contiguous slide is one connected
+    # component, but it is now sub-partitioned into multiple domains (#183), so
+    # ``domain_id`` should no longer collapse to a single label. We keep this
+    # guard as a safety check: if some pathological input still yields a single
+    # domain, every domain-derived metric (Moran's I) is trivially 0, so we
+    # detect and record it explicitly rather than report the zeros as signal.
     n_domains_found = int(np.unique(out.domain_id).size)
     domain_degenerate = n_domains_found <= 1
 
@@ -271,13 +332,10 @@ def main() -> None:
         "domain_clustering_degenerate": bool(domain_degenerate),
         "domain_count_found": n_domains_found,
         "domain_degeneracy_reason": (
-            "main's decoder clusters domains graph-aware: each connected component of "
-            "the kNN graph collapses to one label (decoder.py:_cluster_components). A "
-            "single-section graph over one contiguous DLPFC slide is fully connected "
-            "(1 component), so domain_id degenerates to a single domain regardless of "
-            "n_domains and morans_i_domain is trivially 0. Multi-section runs (multiple "
-            "disconnected components) would yield non-trivial domains. This is recorded "
-            "so the domain metrics are not mistaken for a computed spatial signal."
+            "domain clustering unexpectedly collapsed to a single label despite the "
+            "intra-component partition (decoder.py:_cluster_components, #183). With one "
+            "domain morans_i_domain is trivially 0; this is recorded so the metric is "
+            "not mistaken for a computed spatial signal. Inspect the input graph/budget."
             if domain_degenerate
             else "domain clustering produced multiple domains"
         ),
