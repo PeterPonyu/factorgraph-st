@@ -78,6 +78,8 @@ def fit_transform(
     K_private: int = 2,
     n_domains: int = 5,
     seed: int = 0,
+    encoder: str = "random",
+    encoder_kwargs: dict | None = None,
 ) -> FactorGraphOutputs:
     """Encode inputs, decode nonnegative factors, and validate MVP outputs.
 
@@ -85,10 +87,37 @@ def fit_transform(
     factor-fit pipeline is reproducible end-to-end (closes #87 for the
     model side; the generator side is closed by the matching ``set_seed``
     call in ``synth.generate_instance``).
+
+    ``encoder`` selects the embedding backend (issue #181):
+
+    - ``"random"`` (default): the fixed seeded Gaussian projection in
+      :func:`factorgraph_st.model.encoder.encode_graph`. Unchanged legacy
+      behavior — ``model_is_learned`` stays False.
+    - ``"gnn"``: the opt-in trainable GNN encoder in
+      :mod:`factorgraph_st.model.gnn_encoder` (requires the optional ``model``
+      / torch extra). ``encoder_kwargs`` is forwarded to ``encode_graph_gnn``
+      (e.g. ``{"epochs": 50, "lr": 1e-2}``).
+
+    The trainable path is staged machinery only; flipping the default and
+    factor-recovery validation are later PRs in the #181 series.
     """
     from factorgraph_st.repro import set_seed
     set_seed(seed)
-    H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
+    encoder_kwargs = dict(encoder_kwargs or {})
+    if encoder == "random":
+        if encoder_kwargs:
+            raise ValueError(
+                "encoder_kwargs is only supported for the trainable encoders; "
+                "the 'random' projection takes no extra kwargs."
+            )
+        H = encode_graph(X, coords, section_id, edges, d=d, seed=seed)
+    elif encoder == "gnn":
+        from factorgraph_st.model.gnn_encoder import encode_graph_gnn
+        H = encode_graph_gnn(X, coords, section_id, edges, d=d, seed=seed, **encoder_kwargs)
+    else:
+        raise ValueError(
+            f"unknown encoder={encoder!r}; expected 'random' (default) or 'gnn'"
+        )
     outputs = decode_factors(
         X,
         H,
