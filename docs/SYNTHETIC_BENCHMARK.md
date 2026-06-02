@@ -37,7 +37,7 @@ Synthetic instances have `K_shared` factors active across all sections and `K_pr
 
 | Metric | What it locks | Pass gate |
 |---|---|---|
-| Matched-factor correlation (Hungarian) | Factor recovery vs truth. | set when first run lands |
+| Matched-factor correlation (optimal matching for K≤8, greedy fallback) | Factor recovery vs truth. | set when first run lands |
 | Section-overlap of `Z_shared` vs `Z_private` | Shared / private separation. | set when first run lands |
 | Moran's I over `domain_id` | Spatial coherence of recovered domains. | set when first run lands |
 | ARI(`domain_id`, truth) | Domain recovery. | set when first run lands |
