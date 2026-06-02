@@ -117,6 +117,49 @@ def test_spatial_domain_uses_graph():
     )
 
 
+def _knn_global(coords: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """kNN edge indices (src, dst) over ALL of ``coords`` (one graph)."""
+    n = coords.shape[0]
+    d2 = ((coords[:, None, :] - coords[None, :, :]) ** 2).sum(-1)
+    np.fill_diagonal(d2, np.inf)
+    nn = np.argpartition(d2, k - 1, axis=1)[:, :k]
+    return np.repeat(np.arange(n), k), nn.flatten()
+
+
+def test_single_section_does_not_collapse_to_one_domain():
+    """Regression for #183: a single fully-connected section (one connected
+    component of the kNN graph) must not collapse to a single domain label.
+
+    On main, ``_cluster_components`` sees ``n_comp == 1`` and assigns every spot
+    label 0 (``arange(1) % k``), so ``n_domains_found == 1`` and all domain
+    metrics are trivial. The spectral fallback partitions the single component
+    into ``n_domains`` spatially-coherent regions.
+    """
+    from factorgraph_st.model.decoder import _connected_components
+
+    # One contiguous 12x6 grid = a single Visium-like section.
+    xs, ys = np.meshgrid(np.arange(12), np.arange(6))
+    coords = np.stack([xs.ravel(), ys.ravel()], axis=1).astype(np.float32)
+    n = coords.shape[0]
+    H = np.random.default_rng(0).normal(size=(n, 4)).astype(np.float32)
+    src, dst = _knn_global(coords, k=4)
+    edges = np.stack([src, dst]).astype(np.int64)
+
+    # Precondition: the graph is a SINGLE connected component (the #183 trigger).
+    assert np.unique(_connected_components(edges, n)).size == 1
+
+    labels = _cluster_domains(H, coords, n_domains=2, edges=edges, seed=0)
+    # No longer degenerate: at least 2 domains are recovered.
+    assert np.unique(labels).size >= 2
+    # And they track the two spatial halves (left vs right of the grid).
+    truth = (coords[:, 0] >= 6).astype(np.int64)
+    assert _purity(labels, truth) > 0.9
+
+    # A 3-domain request likewise yields a non-degenerate multi-domain partition.
+    labels3 = _cluster_domains(H, coords, n_domains=3, edges=edges, seed=0)
+    assert np.unique(labels3).size >= 2
+
+
 def test_section_id_used():
     """Regression for #50: decode_factors must consume section_id so train and
     inference share the same private-factor semantics. Two runs with the same

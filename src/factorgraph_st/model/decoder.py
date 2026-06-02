@@ -266,12 +266,14 @@ def _cluster_domains(
 ) -> np.ndarray:
     """Assign domain ids over the z-normalized joint feature ``[H | coords]``.
 
-    When ``edges`` is provided, domains are assigned by graph-aware clustering:
-    each connected component of ``edges`` is collapsed to its centroid and the
-    centroids are clustered (see :func:`_cluster_components`), guaranteeing that
-    every connected component receives a single label. When ``edges`` is None or
-    empty, this falls back to a deterministic per-spot k-means on the same
-    z-normalized feature.
+    When ``edges`` is provided, domains are assigned by graph-aware clustering
+    (see :func:`_cluster_components`): with multiple connected components each
+    component is collapsed to its centroid and the centroids are clustered, so
+    every component receives a single label. A single fully-connected component
+    (one contiguous section) has no centroid structure, so it is partitioned by
+    numpy spectral clustering on the kNN graph instead of collapsing to one
+    label (#183). When ``edges`` is None or empty, this falls back to a
+    deterministic per-spot k-means on the same z-normalized feature.
 
     Closes #101 / extends the #75 fix: per-spot k-means on ``[H | coords]`` alone
     ignores the spatial graph, so coord-overlapping regions are mixed near chance
@@ -337,6 +339,15 @@ def _cluster_components(
     unique_roots, comp_idx = np.unique(roots, return_inverse=True)
     n_comp = unique_roots.size
 
+    if n_comp == 1:
+        # A single fully-connected component (e.g. one contiguous Visium
+        # section) has no centroid structure to cluster: the component path
+        # below collapses every spot to a single label, leaving domain
+        # recovery degenerate (#183). Recover a spatially-coherent k-way
+        # partition with numpy-only spectral clustering on the kNN graph, which
+        # respects the graph topology without a scipy/torch runtime dependency.
+        return _spectral_labels(edges, n, k, seed, n_init, max_iter)
+
     centroids = np.zeros((n_comp, X.shape[1]), dtype=np.float64)
     for i in range(n_comp):
         centroids[i] = X[comp_idx == i].mean(axis=0)
@@ -346,6 +357,39 @@ def _cluster_components(
     else:
         comp_labels = _kmeans(centroids, k, seed, n_init, max_iter)
     return comp_labels[comp_idx].astype(np.int64)
+
+
+def _spectral_labels(
+    edges: np.ndarray, n: int, k: int, seed: int, n_init: int, max_iter: int
+) -> np.ndarray:
+    """Numpy-only normalized-cut spectral clustering on the (symmetrized) kNN graph.
+
+    Builds the symmetric normalized Laplacian ``L_sym = I - D^-1/2 A D^-1/2``,
+    embeds spots in its ``k`` smallest eigenvectors (the Ng-Jordan-Weiss
+    spectral embedding, row-normalized), and k-means clusters that embedding.
+    This partitions a single connected component into ``k`` spatially-coherent
+    domains so domain recovery does not collapse to one label (#183).
+
+    Dense ``eigh`` is used to keep the runtime numpy-only; it is intended for a
+    single tissue section (thousands of spots), the scale at which the
+    degeneracy occurs.
+    """
+    if k <= 1 or n == 0:
+        return np.zeros(n, dtype=np.int64)
+    adjacency = np.zeros((n, n), dtype=np.float64)
+    src, dst = edges
+    adjacency[src, dst] = 1.0
+    adjacency[dst, src] = 1.0  # symmetrize: kNN edges may be directed
+    degree = adjacency.sum(axis=1)
+    d_inv_sqrt = 1.0 / np.sqrt(np.maximum(degree, 1e-12))
+    laplacian = np.eye(n, dtype=np.float64) - (d_inv_sqrt[:, None] * adjacency * d_inv_sqrt[None, :])
+    # eigh returns ascending eigenvalues; the k smallest carry the cluster
+    # structure (eigenvalue 0 has multiplicity = number of components).
+    _, eigvecs = np.linalg.eigh(laplacian)
+    embedding = eigvecs[:, :k]
+    row_norms = np.linalg.norm(embedding, axis=1, keepdims=True)
+    embedding = embedding / np.maximum(row_norms, 1e-12)
+    return _kmeans(embedding, k, seed, n_init, max_iter)
 
 
 def _connected_components(edges: np.ndarray, n: int) -> np.ndarray:
