@@ -27,7 +27,9 @@ permitted files below are provenance citations, not framing adoption.
 | `docs/PROVENANCE_CHECKLIST.md` | Provenance checklist |
 | `docs/SYNTHETIC_BENCHMARK.md` | Baseline-deferral statements |
 | `docs/DRAFT_REVIEW_SUMMARY.md` | Draft review notes referencing baselines |
+| `docs/DATASETS.md` — "Baseline data provenance" section | Citation-only dataset-bundle provenance (Zenodo DOIs); not method endorsement |
 | `manuscript/DRAFT.md` | Baseline-comparison sections in the manuscript draft |
+| `manuscript/LITERATURE_LINKS.md` | Citation-only dataset-provenance footer pointing to `BASELINE_REFERENCES.md` |
 | `.github/ISSUE_TEMPLATE/*.yml` | Issue templates that reference baselines by name |
 | `.github/pull_request_template.md` | PR template references |
 | `scripts/check_independence.sh` | CI guard pattern strings (the pattern itself contains the names) |
