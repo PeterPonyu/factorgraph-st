@@ -18,6 +18,9 @@ because it sums over the *set* of classes, not over their integer codes.
 
 from __future__ import annotations
 
+import importlib.util as _ilu
+from pathlib import Path as _Path
+
 import numpy as np
 import pytest
 
@@ -326,3 +329,64 @@ def test_metric_suite_length_validation():
         weighted_dice(np.array([0, 1]), np.array([0, 1, 2]))
     with pytest.raises(ValueError):
         boundary_f1(np.array([0, 1]), np.array([0, 1, 2]), _line_graph(2))
+
+
+# --- #340: relabel-invariant domain headline + coordinate-only negative control --
+
+_RUNNER = _Path(__file__).resolve().parents[1] / "scripts" / "run_real_factorgraph.py"
+
+
+def _load_runner():
+    spec = _ilu.spec_from_file_location("_run_real_factorgraph_340", _RUNNER)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_coherence_null_below_structured_coherence():
+    """#340: the spatial-shuffle null is well below the true label-invariant
+    coherence on a within-cluster-edge graph (so the reported delta is positive)."""
+    runner = _load_runner()
+    labels, edges = _toy_graph_with_clusters()
+    true_coh = label_invariant_cluster_coherence(labels, edges)
+    null_coh = runner._coherence_null(labels, edges, n_shuffles=50, seed=0)
+    assert true_coh > null_coh + 0.2, (true_coh, null_coh)
+    # Determinism: same seed -> same null.
+    assert runner._coherence_null(labels, edges, 50, 0) == null_coh
+
+
+def test_coherence_null_is_relabel_invariant_like_the_metric():
+    """The null uses the label-invariant metric, so permuting label CODES (not
+    spatial positions) must not change it."""
+    runner = _load_runner()
+    labels, edges = _toy_graph_with_clusters()
+    base = runner._coherence_null(labels, edges, 30, 7)
+    relabeled = _relabel(labels, {0: 5, 1: 9, 2: 2})
+    assert runner._coherence_null(relabeled, edges, 30, 7) == pytest.approx(base)
+
+
+def test_coords_negative_control_is_spatially_coherent():
+    """#340: coordinate-only k-means domains are spatially coherent BY
+    CONSTRUCTION -- this bounds how much domain coherence is attributable to
+    position alone. Three well-separated coordinate blobs -> high coherence,
+    well above its spatial-shuffle null."""
+    runner = _load_runner()
+    rng = np.random.default_rng(0)
+    centers = np.array([[0.0, 0.0], [50.0, 0.0], [0.0, 50.0]])
+    coords = np.vstack([c + rng.normal(0, 1.0, size=(40, 2)) for c in centers])
+    domain_id, embedding = runner._coords_domains(coords, n_domains=3, seed=0)
+    assert np.unique(domain_id).size == 3
+    assert embedding.shape == coords.shape
+    edges = runner._build_knn_edges(coords.astype(np.float32), k=6)
+    coh = label_invariant_cluster_coherence(domain_id, edges)
+    null = runner._coherence_null(domain_id, edges, 30, 0)
+    assert coh > 0.5 and coh > null + 0.3, (coh, null)
+
+
+def test_coords_domains_degenerate_guard():
+    """Single requested domain (k<=1) returns an all-zero labelling, not a crash."""
+    runner = _load_runner()
+    coords = np.random.default_rng(0).normal(size=(20, 2))
+    domain_id, embedding = runner._coords_domains(coords, n_domains=1, seed=0)
+    assert domain_id.shape == (20,) and np.unique(domain_id).size == 1
+    assert embedding.shape == (20, 2)

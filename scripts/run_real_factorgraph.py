@@ -56,13 +56,14 @@ from factorgraph_st.eval.metrics import (
     boundary_precision,
     boundary_recall,
     calinski_harabasz,
+    label_invariant_cluster_coherence,
     morans_i,
     normalized_mutual_information,
     shared_private_separation,
     silhouette,
     weighted_dice,
 )
-from factorgraph_st.model.decoder import fit_transform
+from factorgraph_st.model.decoder import _kmeans, fit_transform
 from factorgraph_st.model.learned import fit_transform_gnmf
 from factorgraph_st.schemas import validate_inputs
 
@@ -138,7 +139,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        choices=("projection", "gnmf", "spatial_smooth"),
+        choices=("projection", "gnmf", "spatial_smooth", "coords"),
         default="projection",
         help=(
             "Factor model / baseline. 'projection' (default) = the existing fixed "
@@ -148,7 +149,10 @@ def _parse_args() -> argparse.Namespace:
             "Laplacian and domains are clustered on H alone. 'spatial_smooth' = the "
             "OPT-IN clean-room comparison BASELINE (baselines.py): neighbor-average "
             "the expression over the kNN graph, reduce by PCA, then k-means into "
-            "domains. It emits only the domain-metric block (no factor model)."
+            "domains. It emits only the domain-metric block (no factor model). "
+            "'coords' = the COORDINATE-ONLY negative control (#340): k-means on the "
+            "raw (x, y) coordinates alone, to bound how much domain spatial-coherence "
+            "is attributable to position rather than to a factor model."
         ),
     )
     parser.add_argument(
@@ -424,6 +428,47 @@ def _morans_null(domain_id: np.ndarray, edges: np.ndarray, n_shuffles: int, seed
     return float(np.mean(vals))
 
 
+def _coherence_null(domain_id: np.ndarray, edges: np.ndarray, n_shuffles: int, seed: int) -> float:
+    """Mean label-invariant cluster coherence over spatially-shuffled labels.
+
+    The chance baseline for :func:`label_invariant_cluster_coherence`: permuting
+    which spot carries which label destroys spatial structure, so the mean
+    coherence over shuffles is the no-structure reference. The reported
+    ``coherence_label_invariant_domain`` should be read as its delta over this
+    null, exactly as ``morans_i_domain`` is read against ``morans_i_domain_null``.
+    """
+    rng = np.random.default_rng(seed)
+    base = np.asarray(domain_id)
+    vals = [
+        label_invariant_cluster_coherence(rng.permutation(base), edges)
+        for _ in range(max(int(n_shuffles), 1))
+    ]
+    return float(np.mean(vals))
+
+
+def _coords_domains(coords: np.ndarray, n_domains: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Coordinate-only negative-control domains: k-means on z-normalized (x, y).
+
+    This is the explicit ablation for #340: it clusters on *nothing but the raw
+    spatial coordinates*. Any spatial-coherence metric (Moran's I or
+    label-invariant coherence) on these domains is high purely because the labels
+    ARE the coordinates — so it bounds how much "spatial structure" is attributable
+    to position alone rather than to a learned factor model. Returns
+    ``(domain_id, embedding)`` with the normalized coords as the embedding so the
+    intrinsic domain-quality suite scores it on the same footing as the models.
+    """
+    xy = np.asarray(coords, dtype=np.float64)
+    std = xy.std(axis=0)
+    std[std == 0.0] = 1.0
+    embedding = ((xy - xy.mean(axis=0)) / std).astype(np.float32)
+    n = embedding.shape[0]
+    k = int(min(max(n_domains, 1), max(n, 1)))
+    if n == 0 or k <= 1:
+        return np.zeros(n, dtype=np.int64), embedding
+    domain_id = _kmeans(embedding.astype(np.float64), k, seed, n_init=4, max_iter=100)
+    return domain_id.astype(np.int64), embedding
+
+
 def main() -> None:
     args = _parse_args()
     h5ad_path = args.h5ad.resolve()
@@ -494,6 +539,15 @@ def main() -> None:
         )
         domain_id = out.domain_id
         embedding = out.H
+    elif args.model == "coords":
+        # COORDINATE-ONLY negative control (#340): cluster on the raw (x, y)
+        # coordinates alone. ``out`` is left None (no factor structure), so only
+        # the domain-metric block is emitted, scored by the SAME eval suite and
+        # behind the SAME GT guard as the models. A high morans_i_domain /
+        # coherence here is the by-construction ceiling that the factor models
+        # must be read against.
+        out = None
+        domain_id, embedding = _coords_domains(coords, args.n_domains, args.seed)
     else:
         out = fit_transform(
             X,
@@ -512,6 +566,13 @@ def main() -> None:
     # --- 5. Intrinsic metrics (+ supervised ARI iff GT labels present, #179) -
     morans_real = morans_i(domain_id.astype(np.float64), edges)
     morans_null = _morans_null(domain_id, edges, args.n_null_shuffles, args.seed)
+    # Relabel-invariant headline (#340): morans_i on integer label CODES is
+    # relabel-sensitive (its own docstring warns to use the label-invariant form
+    # for categorical labels). label_invariant_cluster_coherence averages Moran's
+    # I over per-class one-hot indicators, so it is invariant to which integer is
+    # assigned to which domain. Reported with its own spatial-shuffle null.
+    coherence_real = label_invariant_cluster_coherence(domain_id, edges)
+    coherence_null = _coherence_null(domain_id, edges, args.n_null_shuffles, args.seed)
 
     # Supervised domain ARI vs per-spot GT labels (e.g. Maynard DLPFC layer
     # labels). Computed ONLY when a usable GT obs column is present; skipped
@@ -548,6 +609,9 @@ def main() -> None:
             "morans_i_domain": morans_real,
             "morans_i_domain_null": morans_null,
             "morans_i_domain_delta": morans_real - morans_null,
+            "coherence_label_invariant_domain": coherence_real,
+            "coherence_label_invariant_domain_null": coherence_null,
+            "coherence_label_invariant_domain_delta": coherence_real - coherence_null,
             "domain_clustering_degenerate": float(domain_degenerate),
             "shared_mean_active_sections": sep["shared_mean_active_sections"],
             "private_mean_active_sections": sep["private_mean_active_sections"],
@@ -562,6 +626,9 @@ def main() -> None:
             "morans_i_domain": morans_real,
             "morans_i_domain_null": morans_null,
             "morans_i_domain_delta": morans_real - morans_null,
+            "coherence_label_invariant_domain": coherence_real,
+            "coherence_label_invariant_domain_null": coherence_null,
+            "coherence_label_invariant_domain_delta": coherence_real - coherence_null,
             "domain_clustering_degenerate": float(domain_degenerate),
             "n_edges": float(edges.shape[1]),
             "ari_vs_gt_available": float(ari_domain is not None),
@@ -606,9 +673,8 @@ def main() -> None:
             domain_id=out.domain_id,
         )
         outputs_payload = {"factors": str(output_npz)}
-    else:
-        # Baseline: persist the PCA embedding + domain labels (no factor matrices).
-        assert baseline_out is not None  # out is None <=> spatial_smooth baseline
+    elif baseline_out is not None:
+        # spatial_smooth baseline: persist the PCA embedding + domain labels.
         output_npz = outputs_dir / "baseline_spatial_smooth.npz"
         np.savez_compressed(
             output_npz,
@@ -616,6 +682,12 @@ def main() -> None:
             domain_id=baseline_out.domain_id,
         )
         outputs_payload = {"baseline_spatial_smooth": str(output_npz)}
+    else:
+        # coords negative control (#340): persist the normalized-coordinate
+        # embedding + the coordinate-only domain labels (no factor matrices).
+        output_npz = outputs_dir / "baseline_coords.npz"
+        np.savez_compressed(output_npz, embedding=embedding, domain_id=domain_id)
+        outputs_payload = {"baseline_coords": str(output_npz)}
 
     # --- 7. Emit contract -----------------------------------------------------
     interpretability = {
@@ -723,6 +795,37 @@ def main() -> None:
                 else "baseline clustering produced multiple domains"
             ),
         }
+    elif args.model == "coords":
+        # COORDINATE-ONLY negative control (#340): domains are k-means on the raw
+        # (x, y) coordinates, so every spatial-coherence metric is high BY
+        # CONSTRUCTION. This run exists to bound that ceiling, not to claim quality.
+        interpretability = {
+            "model_is_learned": False,
+            "encoder": (
+                "coordinate-only negative control (#340): no expression model at all; "
+                "domains are k-means on z-normalized (x, y) coordinates"
+            ),
+            "factor_basis": "not applicable (no factor model; embedding is the normalized coords)",
+            "loadings": "not applicable (no factor model; control has no gene loadings)",
+            "domain_assignment": (
+                "k-means on the raw (x, y) coordinates ALONE; coordinates are the only "
+                "input, so domain_id is a direct partition of space"
+            ),
+            "caveat": (
+                "negative control: morans_i_domain AND coherence_label_invariant_domain are "
+                "high purely because the labels ARE the coordinates. Read this as the "
+                "by-construction ceiling that any factor model must be compared against; "
+                "it is never evidence of a learned spatial signal."
+            ),
+            "domain_clustering_degenerate": bool(domain_degenerate),
+            "domain_count_found": n_domains_found,
+            "domain_degeneracy_reason": (
+                "coordinate k-means collapsed to a single label; with one domain "
+                "morans_i_domain is trivially 0. Inspect n_domains / the coordinates."
+                if domain_degenerate
+                else "coordinate clustering produced multiple domains"
+            ),
+        }
     run_metadata = {
         "dataset_paths": [str(h5ad_path)],
         "n_obs": n_obs,
@@ -795,6 +898,8 @@ def main() -> None:
     print(f"Wrote outputs:      {output_npz}")
     print(f"morans_i_domain={morans_real:.6f} null={morans_null:.6f} "
           f"delta={morans_real - morans_null:.6f} runtime_s={runtime_s:.2f}")
+    print(f"coherence_label_invariant_domain={coherence_real:.6f} "
+          f"null={coherence_null:.6f} delta={coherence_real - coherence_null:.6f}")
     if gnmf_result is not None:
         print(f"model=gnmf lam={args.gnmf_lam} objective "
               f"{gnmf_result.objective[0]:.4f} -> {gnmf_result.objective[-1]:.4f} "
