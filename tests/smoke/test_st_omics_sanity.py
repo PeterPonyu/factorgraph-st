@@ -12,8 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import anndata as ad
-
 from factorgraph_st.data.build import build_section_inputs
 from factorgraph_st.schemas import validate_inputs
 
