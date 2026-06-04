@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import permutations
+from math import exp, lgamma, log
 
 import numpy as np
 
@@ -246,6 +247,45 @@ def normalized_mutual_information(labels_true: np.ndarray, labels_pred: np.ndarr
     return float(min(max(mi / denom, 0.0), 1.0))
 
 
+def adjusted_mutual_information(labels_true: np.ndarray, labels_pred: np.ndarray) -> float:
+    """Adjusted mutual information between two label partitions.
+
+    ``AMI = (MI - E[MI]) / (mean(H(U), H(V)) - E[MI])`` with the expectation
+    taken over the hypergeometric model of randomness (Vinh et al., 2010) and
+    the arithmetic mean of the label entropies as the normalizer (matching the
+    convention of :func:`normalized_mutual_information`). Unlike NMI, AMI
+    corrects for the chance agreement that grows with the number of clusters, so
+    it is the appropriate concordance measure when the two partitions have
+    differing cluster counts. ``1.0`` for identical partitions (up to
+    relabeling); ``~0.0`` for independent partitions (can be slightly negative).
+
+    Degenerate cases mirror :func:`adjusted_rand_index`: ``n < 2`` returns
+    ``float('nan')``; when both partitions collapse to a single cluster they are
+    trivially identical and ``1.0`` is returned.
+    """
+    if labels_true.shape[0] != labels_pred.shape[0]:
+        raise ValueError("label arrays must have equal length")
+    n = labels_true.size
+    if n < 2:
+        return float("nan")
+    table = _contingency(labels_true, labels_pred)
+    if table.shape[0] == 1 and table.shape[1] == 1:
+        # Both partitions are a single cluster -> trivially identical.
+        return 1.0
+    mi = _mutual_information(table, n)
+    emi = _expected_mutual_information(table, n)
+    h_true = _entropy(table.sum(axis=1), n)
+    h_pred = _entropy(table.sum(axis=0), n)
+    normalizer = 0.5 * (h_true + h_pred)
+    denom = normalizer - emi
+    # Guard against a vanishing/negative denominator (MI, E[MI] and the
+    # normalizer nearly coincide) so the ratio stays finite, matching the
+    # convention used by scikit-learn's adjusted_mutual_info_score.
+    eps = float(np.finfo("float64").eps)
+    denom = min(denom, -eps) if denom < 0 else max(denom, eps)
+    return float((mi - emi) / denom)
+
+
 def silhouette(embedding: np.ndarray, labels: np.ndarray) -> float:
     """Mean silhouette coefficient of ``labels`` over a Euclidean ``embedding``.
 
@@ -422,6 +462,45 @@ def _entropy(counts: np.ndarray, n: int) -> float:
         return 0.0
     p = counts / n
     return float(-np.sum(p * np.log(p)))
+
+
+def _expected_mutual_information(table: np.ndarray, n: int) -> float:
+    """Expected mutual information (nats) under the hypergeometric null.
+
+    The Vinh et al. (2010) closed form used to chance-correct AMI: the
+    expectation of :func:`_mutual_information` over all contingency tables that
+    share the row/column margins of ``table``. Combinatorial weights are
+    evaluated in log space via ``lgamma`` for numerical stability.
+    """
+    a = table.sum(axis=1)  # row (true) margins
+    b = table.sum(axis=0)  # column (pred) margins
+    emi = 0.0
+    log_n = log(n)
+    lg_n1 = lgamma(n + 1)
+    for ai_v in a:
+        ai = int(ai_v)
+        if ai == 0:
+            continue
+        for bj_v in b:
+            bj = int(bj_v)
+            if bj == 0:
+                continue
+            start = max(1, ai + bj - n)
+            end = min(ai, bj)
+            base = (
+                lgamma(ai + 1) + lgamma(bj + 1)
+                + lgamma(n - ai + 1) + lgamma(n - bj + 1)
+                - lg_n1
+            )
+            for nij in range(start, end + 1):
+                term = (nij / n) * (log_n + log(nij) - log(ai) - log(bj))
+                log_weight = (
+                    base
+                    - lgamma(nij + 1) - lgamma(ai - nij + 1)
+                    - lgamma(bj - nij + 1) - lgamma(n - ai - bj + nij + 1)
+                )
+                emi += term * exp(log_weight)
+    return emi
 
 
 def _pairwise_sq_dists(X: np.ndarray) -> np.ndarray:
