@@ -1,6 +1,7 @@
 """Evaluation metrics for synthetic FactorGraph-ST benchmarks."""
 
 from factorgraph_st.eval.metrics import (
+    adjusted_mutual_information,
     adjusted_rand_index,
     boundary_f1,
     boundary_precision,
@@ -20,6 +21,7 @@ from factorgraph_st.eval.metrics import (
 )
 
 __all__ = [
+    "adjusted_mutual_information",
     "adjusted_rand_index",
     "boundary_f1",
     "boundary_precision",
