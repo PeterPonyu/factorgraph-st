@@ -1,5 +1,13 @@
 """Evaluation metrics for synthetic FactorGraph-ST benchmarks."""
 
+from factorgraph_st.eval.gates import (
+    FactorSelection,
+    GateResult,
+    NullCalibration,
+    coherence_claim_gate,
+    permutation_null_calibration,
+    select_n_factors,
+)
 from factorgraph_st.eval.metrics import (
     adjusted_mutual_information,
     adjusted_rand_index,
@@ -22,9 +30,13 @@ from factorgraph_st.eval.metrics import (
 )
 
 __all__ = [
+    "FactorSelection",
+    "GateResult",
+    "NullCalibration",
     "adjusted_mutual_information",
     "adjusted_rand_index",
     "boundary_f1",
+    "coherence_claim_gate",
     "boundary_precision",
     "boundary_recall",
     "calinski_harabasz",
@@ -35,8 +47,10 @@ __all__ = [
     "matched_factor_correlation",
     "morans_i",
     "normalized_mutual_information",
+    "permutation_null_calibration",
     "reconstruction_error",
     "section_overlap",
+    "select_n_factors",
     "shared_private_separation",
     "silhouette",
     "weighted_dice",
