@@ -62,6 +62,7 @@ from factorgraph_st.eval.metrics import (
     silhouette,
     weighted_dice,
 )
+from factorgraph_st.eval.policy import resolve_eval_policy
 from factorgraph_st.model.decoder import _kmeans, fit_transform
 from factorgraph_st.model.learned import fit_transform_gnmf
 from factorgraph_st.schemas import validate_inputs
@@ -134,6 +135,19 @@ def _parse_args() -> argparse.Namespace:
             "obs column holding per-spot ground-truth domain labels for the "
             "supervised ARI (#179). Default None = auto-detect "
             f"({', '.join(_GT_OBS_KEY_CANDIDATES)}); ARI is skipped if none present."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-class",
+        choices=("A", "B", "unknown"),
+        default=None,
+        help=(
+            "Explicit dataset class for the GT-metric emission policy (#341). "
+            "Class A = trustworthy per-spot ground truth; GT-based metrics "
+            "(ARI/NMI/boundary P-R-F1/weighted-Dice) are emitted ONLY for class A. "
+            "Default None = inferred (A iff usable per-spot GT with >=2 classes is "
+            "present, else unknown). Internal/label-free metrics are always emitted "
+            "regardless of class."
         ),
     )
     parser.add_argument(
@@ -290,6 +304,28 @@ def _resolve_gt_key(adata, gt_obs_key: str | None) -> str | None:
         if key in adata.obs.columns:
             return key
     return None
+
+
+def _gt_label_summary(adata, gt_obs_key: str | None) -> tuple[bool, int, int]:
+    """Summarize usable per-spot GT labels for the dataset-class policy (#341).
+
+    Returns ``(gt_present, n_classes, n_labeled)`` where ``gt_present`` is True
+    iff a usable GT obs column resolves with at least two labeled spots,
+    ``n_classes`` is the number of distinct non-NA labels, and ``n_labeled`` the
+    count of labeled spots. NA/blank tokens (:data:`_GT_NA_TOKENS`) are excluded.
+    This mirrors the guard logic in :func:`_compute_gt_ari` so the policy decision
+    and the metric computation agree on what counts as usable GT.
+    """
+    key = _resolve_gt_key(adata, gt_obs_key)
+    if key is None:
+        return False, 0, 0
+    raw = adata.obs[key].astype(str).to_numpy()
+    valid = np.array([s.strip().lower() not in _GT_NA_TOKENS for s in raw], dtype=bool)
+    n_labeled = int(valid.sum())
+    if n_labeled < 2:
+        return False, 0, n_labeled
+    n_classes = int(np.unique(raw[valid]).size)
+    return True, n_classes, n_labeled
 
 
 def _compute_gt_ari(
@@ -581,19 +617,35 @@ def main() -> None:
     coherence_real = label_invariant_cluster_coherence(domain_id, edges)
     coherence_null = _coherence_null(domain_id, edges, args.n_null_shuffles, args.seed)
 
-    # Supervised domain ARI vs per-spot GT labels (e.g. Maynard DLPFC layer
-    # labels). Computed ONLY when a usable GT obs column is present; skipped
-    # (no fabrication / no wrong-donor join) for label-less datasets like the
-    # active Br2719 section, whose obs carries no domain annotation.
-    ari_domain, gt_key_used, n_gt_labeled = _compute_gt_ari(
-        adata, domain_id, args.gt_obs_key
+    # GT-metric emission POLICY (#341): internal/label-free metrics above are
+    # ALWAYS emitted; GT-based metrics (ARI / NMI / boundary P-R-F1 / weighted
+    # Dice) are emitted ONLY for class-A datasets (trustworthy per-spot GT). The
+    # dataset class is an explicit policy axis (--dataset-class), defaulting to an
+    # inference from GT availability; the presence-based guard below is a strict
+    # SUBSET of the class gate, so a forced class-A on a label-less dataset still
+    # suppresses GT metrics (labels are never fabricated / never joined cross-donor).
+    gt_key_used = _resolve_gt_key(adata, args.gt_obs_key)
+    gt_present, n_gt_classes, n_gt_labeled = _gt_label_summary(adata, args.gt_obs_key)
+    eval_policy = resolve_eval_policy(
+        gt_present=gt_present,
+        n_gt_classes=n_gt_classes,
+        dataset_class=args.dataset_class,
     )
-    # Full supervised domain-quality suite (NMI / weighted Dice / boundary
-    # P-R-F1 / silhouette / Calinski-Harabasz), behind the SAME GT-label guard
-    # as the ARI above: emitted only when usable per-spot GT labels are present.
-    gt_domain_metrics = _compute_gt_domain_metrics(
-        adata, domain_id, embedding, edges, args.gt_obs_key
-    )
+    if eval_policy.gt_metrics_emitted:
+        # Supervised domain ARI + full domain-quality suite vs per-spot GT labels
+        # (e.g. Maynard DLPFC layer labels), behind the SAME usable-GT guard.
+        ari_domain, gt_key_used, n_gt_labeled = _compute_gt_ari(
+            adata, domain_id, args.gt_obs_key
+        )
+        gt_domain_metrics = _compute_gt_domain_metrics(
+            adata, domain_id, embedding, edges, args.gt_obs_key
+        )
+    else:
+        # Class != A (or no usable GT): suppress GT-based metrics entirely. The
+        # gt_key_used / n_gt_labeled discovered above are still reported in
+        # run_metadata so the suppression is auditable, never silent.
+        ari_domain = None
+        gt_domain_metrics = None
 
     # DEGENERACY GUARD: the decoder assigns domains by graph-aware clustering
     # that distributes the domain budget across connected components and runs a
@@ -625,6 +677,10 @@ def main() -> None:
             "n_edges": float(edges.shape[1]),
             "ari_vs_gt_available": float(ari_domain is not None),
             "domain_metric_suite_available": float(gt_domain_metrics is not None),
+            # Eval-policy markers (#341): numeric so they pass the float-only
+            # contract; the string dataset_class + reason live in run_metadata.
+            "dataset_class_is_a": float(eval_policy.dataset_class == "A"),
+            "gt_metrics_gated": float(not eval_policy.gt_metrics_emitted),
         }
     else:
         # spatial_smooth BASELINE: domain-metric block only (no factor structure,
@@ -640,6 +696,10 @@ def main() -> None:
             "n_edges": float(edges.shape[1]),
             "ari_vs_gt_available": float(ari_domain is not None),
             "domain_metric_suite_available": float(gt_domain_metrics is not None),
+            # Eval-policy markers (#341): numeric so they pass the float-only
+            # contract; the string dataset_class + reason live in run_metadata.
+            "dataset_class_is_a": float(eval_policy.dataset_class == "A"),
+            "gt_metrics_gated": float(not eval_policy.gt_metrics_emitted),
         }
     # ``ari_domain`` is recorded ONLY when GT labels were present and evaluable,
     # so a label-less run never emits a misleading ARI value of any kind.
@@ -833,6 +893,19 @@ def main() -> None:
                 else "coordinate clustering produced multiple domains"
             ),
         }
+    # GT-metric emission policy marker (#341), recorded for EVERY model path. The
+    # interpretability block is free-form and propagated verbatim by the results
+    # contract, so the string dataset_class + gating reason that the float-only
+    # metrics map cannot carry live here (mirrored numerically in metrics via
+    # ``dataset_class_is_a`` / ``gt_metrics_gated``).
+    interpretability["eval_policy"] = {
+        "issue": "#341",
+        "dataset_class": eval_policy.dataset_class,
+        "dataset_class_source": eval_policy.dataset_class_source,
+        "gt_metrics_emitted": eval_policy.gt_metrics_emitted,
+        "gt_metrics_gated_reason": eval_policy.reason,
+        "internal_metrics_default_on": True,
+    }
     run_metadata = {
         "dataset_paths": [str(h5ad_path)],
         "n_obs": n_obs,
@@ -850,12 +923,16 @@ def main() -> None:
             "available": ari_domain is not None,
             "obs_key_used": gt_key_used,
             "n_labeled_spots": n_gt_labeled,
+            "n_gt_classes": n_gt_classes,
+            "dataset_class": eval_policy.dataset_class,
+            "gt_metrics_gated": not eval_policy.gt_metrics_emitted,
             "ari_domain": ari_domain,
             "note": (
-                "Supervised ARI of recovered domains vs per-spot GT labels (#179). "
-                "Computed only when a usable GT obs column is present; NA/blank "
-                "spots are dropped from both partitions. No labels are fabricated "
-                "and no cross-donor join is performed."
+                "Supervised ARI of recovered domains vs per-spot GT labels (#179), "
+                "gated by the #341 dataset-class policy: emitted ONLY for class-A "
+                "datasets with usable per-spot GT. NA/blank spots are dropped from "
+                "both partitions; no labels are fabricated and no cross-donor join "
+                "is performed."
             ),
         },
         "notes": (
@@ -891,6 +968,13 @@ def main() -> None:
             "to a plain PCA + k-means ablation."
         )
 
+    # Append the GT-metric emission policy decision (#341) to notes regardless of
+    # model path, so the suppression/emission is auditable from run_metadata even
+    # for consumers that do not parse the interpretability.eval_policy block.
+    run_metadata["notes"] = (
+        f"{run_metadata['notes']} | EVAL POLICY (#341): {eval_policy.reason}."
+    )
+
     paths = results_contract.write_results(
         project="factorgraph-st",
         dataset_card_id=results_contract.dataset_card_id([str(h5ad_path)]),
@@ -914,11 +998,14 @@ def main() -> None:
     if baseline_out is not None:
         print(f"model=spatial_smooth alpha={args.smooth_alpha} hops={args.smooth_hops} "
               f"n_components={args.smooth_n_components} domains_found={n_domains_found}")
+    print(f"eval_policy: dataset_class={eval_policy.dataset_class} "
+          f"({eval_policy.dataset_class_source}) "
+          f"gt_metrics_emitted={eval_policy.gt_metrics_emitted}")
     if ari_domain is not None:
         print(f"ari_domain={ari_domain:.6f} (vs obs[{gt_key_used!r}], "
               f"{n_gt_labeled} labeled spots)")
     else:
-        print("ari_domain=SKIPPED (no usable ground-truth domain labels in obs)")
+        print(f"ari_domain=SKIPPED ({eval_policy.reason})")
 
 
 if __name__ == "__main__":

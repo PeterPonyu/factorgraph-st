@@ -28,11 +28,21 @@ from factorgraph_st.eval.metrics import (
     silhouette,
     weighted_dice,
 )
+from factorgraph_st.eval.policy import (
+    DATASET_CLASSES,
+    EvalPolicy,
+    infer_dataset_class,
+    resolve_eval_policy,
+)
 
 __all__ = [
+    "DATASET_CLASSES",
+    "EvalPolicy",
     "FactorSelection",
     "GateResult",
     "NullCalibration",
+    "infer_dataset_class",
+    "resolve_eval_policy",
     "adjusted_mutual_information",
     "adjusted_rand_index",
     "boundary_f1",
