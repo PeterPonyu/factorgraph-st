@@ -19,6 +19,7 @@ env -- skipped otherwise. Network-free and confined to ``tmp_path``.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +53,19 @@ def _run_runner(h5ad: Path, results_dir: Path) -> dict:
         "--seed",
         "0",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_REPO_ROOT))
+    # The runner imports ``factorgraph_st`` but runs as a SUBPROCESS, which does
+    # not inherit pytest's ``pythonpath=src``. Put ``src`` on PYTHONPATH so the
+    # subprocess resolves the package without an editable install (the documented
+    # local workflow), mirroring how pytest itself collects from ``src``.
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            p for p in (str(_REPO_ROOT / "src"), os.environ.get("PYTHONPATH", "")) if p
+        ),
+    }
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, cwd=str(_REPO_ROOT), env=env
+    )
     assert proc.returncode == 0, (
         f"runner failed (rc={proc.returncode})\nSTDOUT:\n{proc.stdout}\n"
         f"STDERR:\n{proc.stderr}"
