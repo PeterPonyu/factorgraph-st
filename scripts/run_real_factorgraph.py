@@ -44,7 +44,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-import scanpy as sc
 import scipy.sparse as sp
 from scipy.spatial import cKDTree
 
@@ -224,6 +223,11 @@ def _preprocess(adata, *, already_normalized: bool, n_hvg: int, target_sum: floa
     ``target_sum`` (only when normalization ran), ``hvg_applied`` (bool) and
     ``n_genes_used`` (int).
     """
+    # Lazy import: scanpy is a heavy optional [data] dependency not installed in
+    # the CI test env. Keeping it out of module scope lets tests exec this module
+    # (#340 loads it via importlib) without requiring scanpy.
+    import scanpy as sc
+
     if already_normalized:
         norm = {"applied": False, "method": "none"}
     elif _looks_like_raw_counts(adata.X):
@@ -470,6 +474,8 @@ def _coords_domains(coords: np.ndarray, n_domains: int, seed: int) -> tuple[np.n
 
 
 def main() -> None:
+    import scanpy as sc  # lazy import (see _preprocess): keep module import-safe.
+
     args = _parse_args()
     h5ad_path = args.h5ad.resolve()
 
