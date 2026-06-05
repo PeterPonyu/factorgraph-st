@@ -30,9 +30,9 @@ _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO / "src") not in sys.path:
     sys.path.insert(0, str(_REPO / "src"))
 
-from factorgraph_st.eval.metrics import adjusted_rand_index, matched_factor_correlation
-from factorgraph_st.model.learned import fit_transform_gnmf
-from factorgraph_st.synth.generator import generate_instance
+from factorgraph_st.eval.metrics import adjusted_rand_index, matched_factor_correlation  # noqa: E402
+from factorgraph_st.model.learned import fit_transform_gnmf  # noqa: E402
+from factorgraph_st.synth.generator import generate_instance  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
@@ -192,8 +192,10 @@ def main() -> None:
                     run_idx += 1
                     row = _run_one(synth, lam=lam, n_iter=n_iter, tol=tol, seed=seed)
                     results.append(row)
-                    mfc_str = f"{row['matched_factor_correlation']:.4f}" if row["matched_factor_correlation"] is not None else "nan"
-                    ari_str = f"{row['domain_ari']:.4f}" if row["domain_ari"] is not None else "nan"
+                    mfc_v = row["matched_factor_correlation"]
+                    mfc_str = f"{mfc_v:.4f}" if mfc_v is not None else "nan"
+                    ari_v = row["domain_ari"]
+                    ari_str = f"{ari_v:.4f}" if ari_v is not None else "nan"
                     print(
                         f"[{run_idx:3d}/{total_runs}] lam={lam:5.2f} n_iter={n_iter:3d} tol={tol:.0e} "
                         f"seed={seed} -> mfc={mfc_str} ari={ari_str} "
@@ -232,17 +234,27 @@ def main() -> None:
         )
 
     # Sort by mfc_mean descending, then ari_mean descending
-    agg_rows.sort(key=lambda x: (-x["mfc_mean"] if np.isfinite(x["mfc_mean"]) else float("inf"), -x["ari_mean"] if np.isfinite(x["ari_mean"]) else float("inf")))
+    def _sort_key(x):
+        mfc = -x["mfc_mean"] if np.isfinite(x["mfc_mean"]) else float("inf")
+        ari = -x["ari_mean"] if np.isfinite(x["ari_mean"]) else float("inf")
+        return (mfc, ari)
+
+    agg_rows.sort(key=_sort_key)
 
     print("\n=== Aggregated results (sorted by mfc_mean desc) ===")
-    print(f"{'lam':>6}  {'n_iter':>6}  {'tol':>8}  {'mfc_mean':>9}  {'ari_mean':>9}  {'iters_mean':>10}  {'rt_mean_s':>9}")
+    header = f"{'lam':>6}  {'n_iter':>6}  {'tol':>8}  {'mfc_mean':>9}  {'ari_mean':>9}"
+    header += f"  {'iters_mean':>10}  {'rt_mean_s':>9}"
+    print(header)
     print("-" * 75)
     for r in agg_rows:
         mfc_s = f"{r['mfc_mean']:.4f}" if np.isfinite(r["mfc_mean"]) else "  nan"
         ari_s = f"{r['ari_mean']:.4f}" if np.isfinite(r["ari_mean"]) else "  nan"
-        print(
-            f"{r['lam']:>6.2f}  {r['n_iter']:>6d}  {r['tol']:>8.0e}  {mfc_s:>9}  {ari_s:>9}  {r['iters_mean']:>10.1f}  {r['rt_mean_s']:>9.2f}"
+        row_s = (
+            f"{r['lam']:>6.2f}  {r['n_iter']:>6d}  {r['tol']:>8.0e}"
+            f"  {mfc_s:>9}  {ari_s:>9}"
+            f"  {r['iters_mean']:>10.1f}  {r['rt_mean_s']:>9.2f}"
         )
+        print(row_s)
 
     # Recommended defaults: top row by mfc_mean
     best = agg_rows[0]
