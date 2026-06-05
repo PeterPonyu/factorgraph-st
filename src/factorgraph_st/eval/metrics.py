@@ -286,6 +286,106 @@ def adjusted_mutual_information(labels_true: np.ndarray, labels_pred: np.ndarray
     return float((mi - emi) / denom)
 
 
+def factor_covariate_association(
+    factors: np.ndarray,
+    covariate: np.ndarray,
+    *,
+    n_bins: int | None = None,
+) -> dict[str, np.ndarray | float]:
+    """Association between each continuous factor and a categorical covariate.
+
+    For every factor (column of ``factors`` — e.g. the columns of the score
+    matrix ``H`` / ``Z``) this reports the **correlation ratio** ``eta^2`` with
+    the categorical ``covariate`` (e.g. ``section_id`` or a domain label):
+
+        eta^2 = between-group variance / total variance
+              = sum_g n_g (mean_g - mean)^2 / sum_i (x_i - mean)^2
+
+    the canonical categorical->continuous association, in ``[0, 1]``: ``1.0`` when
+    the factor is perfectly determined by the covariate (constant within every
+    group, differing across groups) and ``~0.0`` when the factor is independent
+    of it. A factor with no variance (constant across all spots) is not
+    evaluable and scores ``float('nan')``; with fewer than two groups every
+    ``eta^2`` is ``0.0`` (a single group explains no variance).
+
+    When ``n_bins`` is given each factor is additionally quantile-binned into at
+    most ``n_bins`` bins and its :func:`normalized_mutual_information` with the
+    covariate is reported — a discretized, strictly-monotonic-invariant
+    companion to ``eta^2`` that also captures non-linear (non-monotone)
+    dependence.
+
+    Returns a dict with the per-factor array ``eta_sq`` plus the scalar
+    summaries ``max_eta_sq`` / ``mean_eta_sq`` (``nan`` factors are excluded from
+    the summaries; an all-``nan`` result summarizes to ``nan``). With ``n_bins``
+    it also carries ``nmi`` / ``max_nmi`` / ``mean_nmi``.
+    """
+    factors = np.asarray(factors, dtype=np.float64)
+    if factors.ndim == 1:
+        factors = factors[:, None]
+    if factors.ndim != 2:
+        raise ValueError("factors must be 1D or 2D")
+    covariate = np.asarray(covariate).ravel()
+    n, k = factors.shape
+    if covariate.shape[0] != n:
+        raise ValueError("factors and covariate must have equal length")
+
+    eta_sq = np.full(k, np.nan, dtype=np.float64)
+    if n and k:
+        _, inv = np.unique(covariate, return_inverse=True)
+        inv = inv.ravel()
+        n_groups = int(inv.max()) + 1 if inv.size else 0
+        counts = np.bincount(inv, minlength=n_groups).astype(np.float64)
+        for j in range(k):
+            x = factors[:, j]
+            mean = x.mean()
+            total_ss = float(np.sum((x - mean) ** 2))
+            if total_ss <= 0.0:
+                continue  # constant factor: association not evaluable -> nan
+            if n_groups < 2:
+                eta_sq[j] = 0.0
+                continue
+            group_means = np.bincount(inv, weights=x, minlength=n_groups) / np.maximum(counts, 1.0)
+            between_ss = float(np.sum(counts * (group_means - mean) ** 2))
+            eta_sq[j] = min(max(between_ss / total_ss, 0.0), 1.0)
+
+    finite = eta_sq[np.isfinite(eta_sq)]
+    out: dict[str, np.ndarray | float] = {
+        "eta_sq": eta_sq,
+        "max_eta_sq": float(finite.max()) if finite.size else float("nan"),
+        "mean_eta_sq": float(finite.mean()) if finite.size else float("nan"),
+    }
+
+    if n_bins is not None:
+        if n_bins < 2:
+            raise ValueError("n_bins must be >= 2")
+        nmi = np.full(k, np.nan, dtype=np.float64)
+        for j in range(k):
+            x = factors[:, j]
+            if n < 2 or float(x.max() - x.min()) <= 0.0:
+                continue  # too few samples / constant factor -> not evaluable
+            uniq = np.unique(x)
+            if uniq.size <= n_bins:
+                # Few distinct values (e.g. a discrete/categorical-coded factor):
+                # give each level its own bin so a factor fully determined by the
+                # covariate scores NMI == 1.0 (quantile edges would merge adjacent
+                # levels and understate the association).
+                binned = np.searchsorted(uniq, x)
+            else:
+                # Quantile bin edges, deduplicated so tied columns bin into
+                # whatever distinct levels exist.
+                edges = np.unique(np.quantile(x, np.linspace(0.0, 1.0, n_bins + 1)))
+                if edges.size < 2:
+                    continue
+                binned = np.clip(np.digitize(x, edges[1:-1]), 0, edges.size - 2)
+            nmi[j] = normalized_mutual_information(covariate, binned)
+        finite_nmi = nmi[np.isfinite(nmi)]
+        out["nmi"] = nmi
+        out["max_nmi"] = float(finite_nmi.max()) if finite_nmi.size else float("nan")
+        out["mean_nmi"] = float(finite_nmi.mean()) if finite_nmi.size else float("nan")
+
+    return out
+
+
 def silhouette(embedding: np.ndarray, labels: np.ndarray) -> float:
     """Mean silhouette coefficient of ``labels`` over a Euclidean ``embedding``.
 

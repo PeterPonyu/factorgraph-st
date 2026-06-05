@@ -30,6 +30,7 @@ from factorgraph_st.eval.metrics import (
     boundary_precision,
     boundary_recall,
     calinski_harabasz,
+    factor_covariate_association,
     label_invariant_cluster_coherence,
     matched_factor_correlation,
     normalized_mutual_information,
@@ -390,3 +391,117 @@ def test_coords_domains_degenerate_guard():
     domain_id, embedding = runner._coords_domains(coords, n_domains=1, seed=0)
     assert domain_id.shape == (20,) and np.unique(domain_id).size == 1
     assert embedding.shape == (20, 2)
+
+
+# --- #366: factor-vs-covariate association (correlation ratio eta^2 / NMI) -----
+
+
+def test_factor_covariate_eta_sq_perfectly_determined():
+    """A factor constant within each covariate group (differing across groups)
+    is perfectly explained by it -> eta^2 == 1.0."""
+    covariate = np.repeat(np.array([0, 1, 2]), 20)
+    # Factor value is a pure function of the group code -> within-group variance 0.
+    factor = np.where(covariate == 0, -3.0, np.where(covariate == 1, 0.5, 4.0))
+    res = factor_covariate_association(factor, covariate)
+    assert res["eta_sq"].shape == (1,)
+    assert res["eta_sq"][0] == pytest.approx(1.0)
+    assert res["max_eta_sq"] == pytest.approx(1.0)
+    assert res["mean_eta_sq"] == pytest.approx(1.0)
+
+
+def test_factor_covariate_eta_sq_independent_near_zero():
+    """A random factor independent of the covariate has eta^2 ~ 0 (only the small
+    finite-sample bias ~ (G-1)/(n-1))."""
+    rng = np.random.default_rng(0)
+    n = 900
+    covariate = rng.integers(0, 3, size=n)
+    factor = rng.normal(size=(n, 4))  # 4 independent factors
+    res = factor_covariate_association(factor, covariate)
+    assert res["eta_sq"].shape == (4,)
+    assert np.all(res["eta_sq"] >= 0.0)
+    assert res["max_eta_sq"] < 0.05, res["eta_sq"]
+
+
+def test_factor_covariate_mixed_columns_and_summaries():
+    """Per-factor scores: a determined column scores ~1, an independent column ~0,
+    and the summaries aggregate over the finite per-factor values."""
+    rng = np.random.default_rng(1)
+    covariate = np.repeat(np.array([0, 1, 2, 3]), 60)
+    determined = covariate.astype(np.float64) * 2.0  # eta^2 == 1
+    independent = rng.normal(size=covariate.size)  # eta^2 ~ 0
+    factors = np.column_stack([determined, independent])
+    res = factor_covariate_association(factors, covariate)
+    assert res["eta_sq"][0] == pytest.approx(1.0)
+    assert res["eta_sq"][1] < 0.05
+    assert res["max_eta_sq"] == pytest.approx(1.0)
+    assert res["mean_eta_sq"] == pytest.approx(np.mean(res["eta_sq"]))
+
+
+def test_factor_covariate_determinism():
+    """Pure-numpy metric: identical inputs -> bit-identical per-factor arrays and
+    summaries across repeated calls."""
+    rng = np.random.default_rng(7)
+    covariate = rng.integers(0, 5, size=300)
+    factors = rng.normal(size=(300, 6))
+    a = factor_covariate_association(factors, covariate, n_bins=5)
+    b = factor_covariate_association(factors, covariate, n_bins=5)
+    assert np.array_equal(a["eta_sq"], b["eta_sq"])
+    assert np.array_equal(a["nmi"], b["nmi"])
+    assert a["max_eta_sq"] == b["max_eta_sq"]
+    assert a["mean_nmi"] == b["mean_nmi"]
+
+
+def test_factor_covariate_constant_factor_is_nan():
+    """A zero-variance (constant) factor is not evaluable -> eta^2 is NaN and is
+    excluded from the summaries."""
+    covariate = np.repeat(np.array([0, 1, 2]), 10)
+    factors = np.column_stack([
+        np.full(covariate.size, 3.14),  # constant -> NaN
+        covariate.astype(np.float64),  # determined -> 1.0
+    ])
+    res = factor_covariate_association(factors, covariate)
+    assert np.isnan(res["eta_sq"][0])
+    assert res["eta_sq"][1] == pytest.approx(1.0)
+    # Summaries ignore the NaN column.
+    assert res["max_eta_sq"] == pytest.approx(1.0)
+    assert res["mean_eta_sq"] == pytest.approx(1.0)
+
+
+def test_factor_covariate_single_group_is_zero():
+    """A covariate with a single group explains no variance -> eta^2 == 0.0."""
+    covariate = np.zeros(30, dtype=int)
+    factor = np.random.default_rng(0).normal(size=30)
+    res = factor_covariate_association(factor, covariate)
+    assert res["eta_sq"][0] == 0.0
+
+
+def test_factor_covariate_nmi_path_detects_nonmonotone_dependence():
+    """The discretized-NMI companion flags a factor fully determined by the
+    covariate (here a non-monotone group->value map) and stays ~0 for noise."""
+    covariate = np.repeat(np.array([0, 1, 2]), 100)
+    # Non-monotone mapping (0->5, 1->-5, 2->0): still perfectly determined.
+    determined = np.where(covariate == 0, 5.0, np.where(covariate == 1, -5.0, 0.0))
+    rng = np.random.default_rng(3)
+    independent = rng.normal(size=covariate.size)
+    factors = np.column_stack([determined, independent])
+    res = factor_covariate_association(factors, covariate, n_bins=8)
+    assert "nmi" in res and res["nmi"].shape == (2,)
+    assert res["nmi"][0] == pytest.approx(1.0, abs=1e-9)
+    assert res["nmi"][1] < 0.2
+    assert res["max_nmi"] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_factor_covariate_length_mismatch_raises():
+    """Mismatched factor/covariate lengths fail loudly."""
+    with pytest.raises(ValueError):
+        factor_covariate_association(np.zeros((10, 2)), np.zeros(9, dtype=int))
+
+
+def test_factor_covariate_eta_sq_within_unit_range():
+    """eta^2 is a variance ratio bounded to [0, 1] for arbitrary inputs."""
+    rng = np.random.default_rng(11)
+    covariate = rng.integers(0, 4, size=200)
+    factors = rng.normal(size=(200, 5)) * rng.normal(size=5)
+    res = factor_covariate_association(factors, covariate)
+    finite = res["eta_sq"][np.isfinite(res["eta_sq"])]
+    assert np.all(finite >= 0.0) and np.all(finite <= 1.0)
