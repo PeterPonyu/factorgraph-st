@@ -139,13 +139,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         choices=("projection", "gnmf", "spatial_smooth", "coords"),
-        default="projection",
+        default="gnmf",
         help=(
-            "Factor model / baseline. 'projection' (default) = the existing fixed "
-            "random Gaussian projection encoder + NNLS loadings + [H|coords] "
-            "domains (unchanged). 'gnmf' = the OPT-IN trained graph-regularized NMF "
-            "(model/learned.py): spatial coherence is learned via the graph "
-            "Laplacian and domains are clustered on H alone. 'spatial_smooth' = the "
+            "Factor model / baseline. 'gnmf' (default) = the trained graph-regularized "
+            "NMF (model/learned.py): spatial coherence is learned via the graph "
+            "Laplacian and domains are clustered on H alone. 'projection' = the "
+            "non-learned baseline (the fixed random Gaussian projection encoder + NNLS "
+            "loadings + [H|coords] domains). 'spatial_smooth' = the "
             "OPT-IN clean-room comparison BASELINE (baselines.py): neighbor-average "
             "the expression over the kNN graph, reduce by PCA, then k-means into "
             "domains. It emits only the domain-metric block (no factor model). "
