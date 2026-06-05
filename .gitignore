@@ -39,3 +39,6 @@ manuscript/*.blg
 manuscript/*.log
 manuscript/*.out
 manuscript/*.pdf
+
+# Claude Code runtime state (matches parent spatial-omics-reform/.gitignore)
+.claude/
