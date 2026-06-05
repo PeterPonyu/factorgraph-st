@@ -36,8 +36,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RUNNER = _REPO_ROOT / "scripts" / "run_real_factorgraph.py"
 
 
-def _run_runner(h5ad: Path, results_dir: Path) -> dict:
-    """Invoke run_real_factorgraph.py on ``h5ad`` and return parsed metrics.json."""
+def _run_runner(h5ad: Path, results_dir: Path, model: str | None = None) -> dict:
+    """Invoke run_real_factorgraph.py on ``h5ad`` and return parsed metrics.json.
+
+    ``model`` pins ``--model`` when given; left ``None`` it exercises the runner's
+    default model (used by the default-model guard test).
+    """
     cmd = [
         sys.executable,
         str(_RUNNER),
@@ -53,6 +57,8 @@ def _run_runner(h5ad: Path, results_dir: Path) -> dict:
         "--seed",
         "0",
     ]
+    if model is not None:
+        cmd += ["--model", model]
     # The runner imports ``factorgraph_st`` but runs as a SUBPROCESS, which does
     # not inherit pytest's ``pythonpath=src``. Put ``src`` on PYTHONPATH so the
     # subprocess resolves the package without an editable install (the documented
@@ -100,7 +106,10 @@ def test_labeled_chain_flips_ari_available_and_metrics_finite(tmp_path):
     adata.write_h5ad(prepared)
 
     # 3. Runner emits the supervised suite; ari_vs_gt_available flips to 1.0.
-    metrics = _run_runner(prepared, tmp_path / "results_labeled")
+    #    Pin the cheap non-learned baseline: this test verifies the ingestion +
+    #    GT-wiring chain, which is model-agnostic (GNMF+GT is covered separately
+    #    in tests/test_learned.py and by test_default_model_is_the_learned_gnmf).
+    metrics = _run_runner(prepared, tmp_path / "results_labeled", model="projection")
     assert metrics["ari_vs_gt_available"] == 1.0
     assert metrics["domain_metric_suite_available"] == 1.0
     assert np.isfinite(metrics["ari_domain"]), metrics["ari_domain"]
@@ -127,10 +136,36 @@ def test_unlabeled_chain_degrades_gracefully(tmp_path):
     raw = build_fixture(
         tmp_path / "unlabeled.h5ad", seed=1, with_labels=False
     )
-    metrics = _run_runner(raw, tmp_path / "results_unlabeled")
+    metrics = _run_runner(raw, tmp_path / "results_unlabeled", model="projection")
     assert metrics["ari_vs_gt_available"] == 0.0
     assert metrics["domain_metric_suite_available"] == 0.0
     assert "ari_domain" not in metrics  # never fabricated when no GT present
+
+
+def test_default_model_is_the_learned_gnmf(tmp_path):
+    """#353: the runner's DEFAULT --model is the trained GNMF (learned path).
+
+    Run the chain with no explicit --model so the parser default is exercised.
+    metrics.json carries the GNMF training objective (emitted only on the trained
+    path); run_metadata.json marks the learned model in its interpretability block.
+    """
+    from factorgraph_st.data.maynard import load_spatiallibd_h5ad
+
+    raw = build_fixture(tmp_path / "raw_spatiallibd.h5ad", seed=0)
+    adata = load_spatiallibd_h5ad(raw)
+    prepared = tmp_path / "prepared.h5ad"
+    adata.write_h5ad(prepared)
+
+    results_dir = tmp_path / "results_default"
+    metrics = _run_runner(prepared, results_dir)  # no --model -> parser default
+    # metrics.json: the GNMF objective is emitted ONLY on the trained path.
+    assert "gnmf_objective_final" in metrics, sorted(metrics)
+    assert np.isfinite(metrics["gnmf_objective_final"]), metrics["gnmf_objective_final"]
+    # run_metadata.json: the interpretability block marks the learned model.
+    run_metadata = json.loads(
+        (results_dir / "factorgraph-st" / "run_metadata.json").read_text()
+    )
+    assert run_metadata["interpretability"]["model_is_learned"] is True
 
 
 def test_loader_raises_when_no_layer_column(tmp_path):

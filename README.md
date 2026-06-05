@@ -8,7 +8,11 @@ The project centers on a future model that combines graph neural encoders with n
 
 ## Current implementation status
 
-The code in `src/factorgraph_st/` today is a **deterministic, non-learned reference implementation (MVP baseline)**, not the planned learned model. `encode_graph` (`model/encoder.py`) applies a single neighbor-mean aggregation over the spatial graph and then a **fixed random Gaussian projection** — it has no trained parameters and no message passing beyond one hop. `decode_factors` (`model/decoder.py`) rectifies the embedding and fits gene loadings by clipped nonnegative least squares; it is not a learned NMF. The learned "graph neural encoder" described above is planned, not yet implemented.
+The default model in `scripts/run_real_factorgraph.py` is **GNMF** — a genuinely *trained* graph-regularized nonnegative matrix factorization (`model/learned.py`). It minimizes `‖X − H Wᵀ‖²_F + λ·Tr(Hᵀ L H)` over `H, W ≥ 0` by multiplicative updates, so spatial coherence is **learned** through the graph-Laplacian penalty (coordinates are never concatenated into the features) and domains are clustered on the factor scores `H` alone.
+
+The previous default — the non-learned `projection` baseline (a **fixed random Gaussian projection** in `model/encoder.py` with no trained parameters, plus clipped-NNLS gene loadings in `model/decoder.py` and `[H|coords]` domains) — is retained as an opt-in baseline (`--model projection`), alongside `--model spatial_smooth` and the `--model coords` negative control.
+
+Honesty note: GNMF is a trained matrix-factorization model, **not yet** the planned parametric *graph neural* encoder described under Scientific focus — that remains future work. All biological/performance claims stay gated in `CLAIM_LEDGER.md` until validated on labeled data.
 
 ## Baseline references
 
