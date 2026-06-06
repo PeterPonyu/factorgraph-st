@@ -248,6 +248,41 @@ def collect(
     return build_scores(summaries), build_accuracy_results(dataset_id, summaries), summaries
 
 
+def collect_records(runs_root: Path, h5ad: Path, gt_obs_key: str, dataset_id: str) -> list[dict[str, object]]:
+    """Per-seed long-form accuracy records for the cross-dataset panel (#322).
+
+    Returns one row per ``(dataset, variant, seed)`` with ``ari``/``nmi``/``ami``
+    recomputed on the labeled subset -- the un-aggregated counterpart of
+    :func:`collect`, so the cross-dataset figure can show per-seed *spread* (not
+    just the mean). The seed is read back from each ``<method>_seed<N>`` dir name.
+    """
+    import anndata as ad  # noqa: PLC0415  (heavy, lazy)
+
+    adata = ad.read_h5ad(h5ad)
+    if gt_obs_key not in adata.obs:
+        raise SystemExit(f"--gt-obs-key {gt_obs_key!r} not in obs columns {list(adata.obs.columns)}")
+    gt_valid, gt_codes = labeled_gt_codes(adata.obs[gt_obs_key].to_numpy())
+
+    records: list[dict[str, object]] = []
+    for method, run_dirs in group_run_dirs(runs_root).items():
+        for run_dir in run_dirs:
+            parsed = parse_run_dirname(run_dir.name)
+            seed = parsed[1] if parsed is not None else -1
+            dom = _load_domain_id(run_dir).astype(np.int64)[gt_valid]
+            acc = accuracy_from_labels(gt_codes, dom)
+            records.append(
+                {
+                    "dataset": dataset_id,
+                    "variant": method,
+                    "seed": int(seed),
+                    "ari": float(acc["ari"]),
+                    "nmi": float(acc["nmi"]),
+                    "ami": float(acc["ami"]),
+                }
+            )
+    return records
+
+
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs-root", type=Path, required=True, help="Dir of <method>_seed<N> runner outputs.")
@@ -269,8 +304,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     (out_dir / "accuracy_results.json").write_text(
         json.dumps(accuracy, indent=2, sort_keys=True), encoding="utf-8"
     )
+    records = collect_records(args.runs_root, args.h5ad, args.gt_obs_key, args.dataset_id)
+    (out_dir / "per_seed_records.json").write_text(
+        json.dumps(records, indent=2, sort_keys=True), encoding="utf-8"
+    )
     print(f"wrote {out_dir / 'scores.json'} ({len(scores)} methods on the scorecard)")
     print(f"wrote {out_dir / 'accuracy_results.json'}")
+    print(f"wrote {out_dir / 'per_seed_records.json'} ({len(records)} per-seed rows)")
     for method in sorted(summaries):
         s = summaries[method]
         stab = "n/a" if s["stability"] is None else f"{s['stability']:.3f}"
