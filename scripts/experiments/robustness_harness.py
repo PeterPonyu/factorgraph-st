@@ -46,8 +46,15 @@ class HarnessConfig:
     n_domains: int = 4
     k_nn: int = 6
     noise_sigma: float = 0.5
-    # GNMF fit hyperparameters.
-    lam: float = 1.0
+    # GNMF fit hyperparameters. NOTE (#392): ``fit_gnmf`` now interprets ``lam``
+    # relative to the data scale (effective weight = ``lam * RMS(X)``) so the fit is
+    # invariant to a global rescale of X. This harness's synthetic instance has
+    # ``RMS(X) ~= 5.37``, so to keep the model-selection property (#308) evaluated at
+    # the SAME effective regularization it was validated at before the fix
+    # (effective ~= 1.0), the default is set to ``1 / RMS(X) ~= 0.186`` -- a units
+    # conversion that preserves the prior operating point, NOT a value searched to
+    # make the curve peak.
+    lam: float = 0.186
     n_iter: int = 80
     tol: float = 1e-4
 

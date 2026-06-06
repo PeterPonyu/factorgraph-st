@@ -62,12 +62,18 @@ class GNMFResult:
     n_iter_run:
         Number of multiplicative-update iterations actually executed (<=
         ``n_iter``; fewer when the relative objective change falls below ``tol``).
+    lam_effective:
+        The graph-regularization weight actually used internally,
+        ``lam * RMS(X)`` (see :func:`fit_gnmf`). Recorded for transparency so the
+        scale-relative weighting behind a run is never implicit. ``0.0`` only for
+        the degenerate empty-input early return.
     """
 
     H: np.ndarray
     W: np.ndarray
     objective: np.ndarray
     n_iter_run: int
+    lam_effective: float = 0.0
 
 
 def _graph_terms(edges: np.ndarray, n_spots: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -123,8 +129,18 @@ def fit_gnmf(
     n_factors:
         Number of latent factors ``k`` (must be positive).
     lam:
-        Graph-regularization strength (``lam >= 0``). ``lam = 0`` recovers plain
-        NMF; larger values pull neighboring spots toward equal factor scores.
+        Graph-regularization strength (``lam >= 0``), interpreted *relative to the
+        data scale*: internally the Laplacian penalty is weighted by
+        ``lam_eff = lam * RMS(X)`` with ``RMS(X) = sqrt(mean(X^2))`` (#392). Because
+        ``RMS`` is degree-1-homogeneous in ``X``, this makes the fit -- and the
+        domain partition clustered from ``H`` -- **invariant to a global rescaling
+        of** ``X`` (e.g. raw counts vs CPM vs log1p): under ``X -> cX`` the
+        reconstruction term scales as ``c^2`` and the Laplacian term as ``c``, and
+        scaling ``lam_eff`` by ``c`` exactly compensates so ``H -> sqrt(c) H`` and
+        the z-normalized clustering is unchanged. A bare constant ``lam`` (the prior
+        behavior) did NOT have this property -- the recovered domains depended on
+        the arbitrary units of ``X``. ``lam = 0`` still recovers plain NMF; larger
+        values pull neighboring spots toward equal factor scores.
     n_iter:
         Maximum number of multiplicative-update iterations.
     tol:
@@ -156,6 +172,14 @@ def fit_gnmf(
     src_sym, dst_sym, degree = _graph_terms(edges, n_spots)
     degree_col = degree[:, None]
 
+    # Scale-relative regularization (#392): weight the Laplacian penalty by the
+    # data RMS so the recon (~c^2) and smoothness (~c) terms stay in fixed balance
+    # under a global rescale X -> cX. This makes the recovered domain partition
+    # invariant to the arbitrary units of X (counts / CPM / log1p). A bare constant
+    # `lam` did not, so domains depended on input scale.
+    data_rms = float(np.sqrt(np.mean(Xf * Xf)))
+    lam_eff = float(lam) * (data_rms if np.isfinite(data_rms) and data_rms > _EPS else 1.0)
+
     # Seeded nonnegative init scaled so H @ W.T has the magnitude of X. Drawing
     # from a strictly-positive uniform avoids exact zeros, which multiplicative
     # updates can never escape.
@@ -170,15 +194,15 @@ def fit_gnmf(
         # Tr(H.T L H) = Tr(H.T D H) - Tr(H.T A H); both terms via scatter-add.
         AH = _adj_matmul(src_sym, dst_sym, H, n_spots)
         smooth = float(np.sum(degree_col * H * H) - np.sum(H * AH))
-        return recon + lam * smooth
+        return recon + lam_eff * smooth
 
     trace = [objective(H, W)]
     n_run = 0
     for _ in range(n_iter):
         # --- H update: H *= (X W + lam A H) / (H (W.T W) + lam D H) -----------
         AH = _adj_matmul(src_sym, dst_sym, H, n_spots)
-        numer_H = Xf @ W + lam * AH
-        denom_H = H @ (W.T @ W) + lam * degree_col * H
+        numer_H = Xf @ W + lam_eff * AH
+        denom_H = H @ (W.T @ W) + lam_eff * degree_col * H
         H = H * numer_H / (denom_H + _EPS)
 
         # --- W update: W *= (X.T H) / (W (H.T H)) -----------------------------
@@ -198,6 +222,7 @@ def fit_gnmf(
         W=W.astype(np.float32),
         objective=np.asarray(trace, dtype=np.float64),
         n_iter_run=n_run,
+        lam_effective=lam_eff,
     )
 
 
