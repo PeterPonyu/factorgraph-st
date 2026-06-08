@@ -207,9 +207,9 @@ def _baseline_aris(baselines_path: Path | None, dataset_id: str) -> dict[str, fl
 def run_sweep(args: argparse.Namespace) -> dict:
     """Execute the real-data lam sweep and return the full result payload."""
     import anndata as ad  # noqa: PLC0415
+    from table_domain_accuracy import accuracy_from_labels  # noqa: PLC0415
 
     from factorgraph_st.model.learned import fit_transform_gnmf  # noqa: PLC0415
-    from table_domain_accuracy import accuracy_from_labels  # noqa: PLC0415
 
     rrf = _load_runner()
     adata = ad.read_h5ad(args.h5ad)
