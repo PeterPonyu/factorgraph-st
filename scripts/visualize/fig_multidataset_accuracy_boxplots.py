@@ -139,14 +139,14 @@ def render_boxplots(
     positions = np.arange(len(variants), dtype=float)
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(3.6 * len(metrics) + 1.0, 4.8), squeeze=False)
-    for ax, metric in zip(axes[0], metrics):
+    for ax, metric in zip(axes[0], metrics, strict=False):
         series = boxplot_series(records, metric)
         data = [series.get(v, []) for v in variants]
         ax.boxplot(
             [d if d else [np.nan] for d in data],
             positions=positions, widths=0.6, showfliers=False,
         )
-        for pos, vals in zip(positions, data):
+        for pos, vals in zip(positions, data, strict=False):
             if vals:
                 jitter = np.linspace(-0.18, 0.18, len(vals))
                 ax.scatter(
@@ -196,7 +196,7 @@ def render_mean_rank(
 
     fig, ax = plt.subplots(figsize=(6.0, 0.6 * len(variants) + 2.0))
     ax.barh(y, values, color="#56B4E9", edgecolor="black", linewidth=0.6, zorder=2)
-    for yi, val in zip(y, values):
+    for yi, val in zip(y, values, strict=False):
         ax.text(val, yi, f" {val:.2f}", va="center", fontsize=8)
     ax.set_yticks(y)
     ax.set_yticklabels(variants, fontsize=9)

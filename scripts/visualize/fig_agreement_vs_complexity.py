@@ -324,8 +324,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--h5ad", type=_parse_h5ad_arg, action="append", required=True,
         help="NAME=PATH source AnnData for reference-ambiguity; repeatable, NAME is the dataset id.",
     )
-    parser.add_argument("--gt-obs-key", type=str, default="ground_truth", help="obs column with per-spot reference labels.")
-    parser.add_argument("--expert", type=str, action="append", default=[], help="Dataset id to flag as expert-annotated; repeatable.")
+    parser.add_argument(
+        "--gt-obs-key", type=str, default="ground_truth", help="obs column with per-spot reference labels."
+    )
+    parser.add_argument(
+        "--expert", type=str, action="append", default=[], help="Dataset id to flag as expert-annotated; repeatable."
+    )
     parser.add_argument("--n-comps", type=int, default=50, help="Max PCA components for the silhouette embedding.")
     parser.add_argument("--out", type=Path, required=True, help="Output PNG path.")
     parser.add_argument("--title", type=str, default="Agreement vs reference-label complexity")
