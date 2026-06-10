@@ -12,20 +12,17 @@ labels are never fabricated or joined across donors. Emits the uniform
 computational results contract (``metrics.json`` + ``run_metadata.json`` +
 ``outputs/``) via the vendored :mod:`factorgraph_st.results_contract`.
 
-SCIENTIFIC-HONESTY NOTE (see consensus plan §4.3): the FactorGraph-ST "model"
-is NOT a learned factor model. The encoder is a fixed random Gaussian
-projection of neighbor-aggregated features (``encoder.py``: a single seeded
-``rng.normal`` projection, no training/backprop), the factor basis is a
-deterministic rectified-and-normalized transform of ``H`` (``_positive_basis``),
-and loadings are a numpy-only NNLS fit. Spatial coordinates + neighbor means are
-baked into the projected features (``encoder.py``). Domains are assigned by a
-deterministic GRAPH-AWARE k-means pass on the joint ``[H | coords]`` feature
-(``decoder.py:_cluster_domains``) -- because coordinates are an explicit
-clustering input, Moran's I on ``domain_id`` is HIGH BY CONSTRUCTION (it partly
-re-reads out the coordinates fed in), not evidence of learned spatial biology.
-This runner pairs every reported ``morans_i_domain`` with a permutation-shuffled
-null (``morans_i_domain_null``) and records a mandatory interpretability block so
-the value is only ever interpreted as a delta over chance.
+SCIENTIFIC-HONESTY NOTE: the default real-data model is now trained GNMF
+(``--model gnmf``, ``factorgraph_st.model.learned.fit_transform_gnmf``), NOT the
+retired fixed random Gaussian projection. GNMF optimizes nonnegative spot factors
+``H`` and gene loadings ``W`` with a graph-Laplacian smoothness penalty; domains are
+clustered from ``H`` alone (coordinates are NOT concatenated), so Moran's I on
+``domain_id`` is NOT high-by-construction. The old ``--model projection`` path remains
+only as an opt-in ablation/baseline. Current reproduced evidence is HONEST-NEGATIVE:
+trained GNMF is dominated by trivial coordinate and spatial-smoothing controls on both
+DLPFC and STARmap (``results/cross_dataset/tables/domain_accuracy.md``; issue #392).
+This runner must NOT present Moran's I or domain accuracy as evidence the learned model
+beats baselines.
 
 This script lives entirely in the runner: densify, normalization
 (``normalize_total`` -> ``log1p`` on count-like input, optional HVG selection),
